@@ -1,0 +1,60 @@
+"""Protocols for connection repository."""
+
+from typing import Optional, Protocol, Union
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context.api.context import ApiContext
+from connector_context.core.context import BaseContext
+from connector_context.core.shared_models import IntegrationType
+from connector_context.db.unit_of_work import UnitOfWork
+from connector_context.models.connection import Connection
+from connector_context.schemas.connection import ConnectionCreate, ConnectionUpdate
+
+
+class ConnectionRepositoryProtocol(Protocol):
+    """Read-only access to connection records."""
+
+    async def get(self, db: AsyncSession, id: UUID, ctx: BaseContext) -> Optional[Connection]:
+        """Get a connection by ID within an organization."""
+        ...
+
+    async def get_by_readable_id(
+        self, db: AsyncSession, readable_id: str, ctx: ApiContext
+    ) -> Optional[Connection]:
+        """Get a connection by human-readable ID within an organization."""
+        ...
+
+    async def create(
+        self,
+        db: AsyncSession,
+        *,
+        obj_in: ConnectionCreate,
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> Connection:
+        """Create a connection."""
+        ...
+
+    async def get_by_integration_type(
+        self, db: AsyncSession, *, integration_type: IntegrationType, ctx: ApiContext
+    ) -> list[Connection]:
+        """Get org-scoped connections filtered by integration type."""
+        ...
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: Connection,
+        obj_in: Union[ConnectionUpdate, dict],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> Connection:
+        """Update a connection."""
+        ...
+
+    async def remove(self, db: AsyncSession, *, id: UUID, ctx: ApiContext) -> Optional[Connection]:
+        """Delete a connection by ID."""
+        ...

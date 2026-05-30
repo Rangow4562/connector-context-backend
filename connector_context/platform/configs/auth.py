@@ -1,0 +1,1173 @@
+"""Auth config."""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+from urllib.parse import urlparse
+
+from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from typing_extensions import Self
+
+from connector_context.platform.configs._base import BaseConfig
+from connector_context.platform.utils.ssrf import validate_host, validate_url
+
+
+class AuthConfig(BaseConfig):
+    """Authentication config schema."""
+
+    pass
+
+
+class OAuth2AuthConfig(AuthConfig):
+    """Base OAuth2 authentication config.
+
+    This is for OAuth2 sources that only have access tokens (no refresh).
+    These sources require going through the OAuth flow and cannot be created via API.
+    """
+
+    access_token: str = Field(
+        title="Access Token",
+        description="The access token for the OAuth2 app. This is obtained through the OAuth flow.",
+    )
+
+
+class OAuth2WithRefreshAuthConfig(OAuth2AuthConfig):
+    """OAuth2 authentication config with refresh token support.
+
+    These sources support refresh tokens for long-lived access.
+    They require going through the OAuth flow and cannot be created via API.
+    """
+
+    refresh_token: str = Field(
+        title="Refresh Token",
+        description="The refresh token for the OAuth2 app. "
+        "This is obtained through the OAuth flow.",
+    )
+
+
+class OAuth2BYOCAuthConfig(OAuth2WithRefreshAuthConfig):
+    """OAuth2 Bring Your Own Credentials authentication config.
+
+    These are OAuth2 sources where users provide their own client credentials.
+    While they still require OAuth flow, users need to configure client_id/client_secret first.
+    """
+
+    client_id: Optional[str] = Field(
+        default=None, title="Client ID", description="Your OAuth application's client ID"
+    )
+    client_secret: Optional[str] = Field(
+        default=None, title="Client Secret", description="Your OAuth application's client secret"
+    )
+
+
+class APIKeyAuthConfig(AuthConfig):
+    """API key authentication credentials schema."""
+
+    api_key: str = Field(title="API Key", description="The API key for the API")
+
+
+class OpenAIAuthConfig(APIKeyAuthConfig):
+    """OpenAI authentication credentials schema."""
+
+    api_key: str = Field(title="API Key", description="The API key for the OpenAI account")
+
+
+class URLAndAPIKeyAuthConfig(AuthConfig):
+    """URL and API key authentication credentials schema."""
+
+    url: str = Field(title="URL", description="The URL of the API")
+    api_key: str = Field(title="API Key", description="The API key for the API")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_ssrf(cls, v: str) -> str:
+        """Validate URL is not targeting internal resources."""
+        return validate_url(v)
+
+
+# Source auth configs
+
+
+# Source database-specific auth configs
+class ODBCAuthConfig(AuthConfig):
+    """ODBC authentication credentials schema."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    host: str = Field(title="Host", description="The host of the ODBC database")
+    port: int = Field(title="Port", description="The port of the ODBC database")
+    database: str = Field(title="Database", description="The name of the ODBC database")
+    username: str = Field(title="Username", description="The username for the ODBC database")
+    password: str = Field(title="Password", description="The password for the ODBC database")
+    db_schema: str = Field(
+        alias="schema", title="Schema", description="The schema of the ODBC database"
+    )
+    tables: str = Field(title="Tables", description="The tables of the ODBC database")
+
+    @field_validator("host")
+    @classmethod
+    def validate_host_ssrf(cls, v: str) -> str:
+        """Validate host is not targeting internal resources."""
+        return validate_host(v)
+
+
+class BaseDatabaseAuthConfig(AuthConfig):
+    """Base database authentication configuration."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "host": "localhost",
+                "port": 5432,
+                "database": "mydb",
+                "user": "postgres",
+                "password": "secret",
+                "schema": "public",
+                "tables": "users,orders",
+            }
+        },
+    )
+
+    host: str = Field(
+        title="Host",
+        description="The host of the PostgreSQL database",
+        min_length=1,
+    )
+    port: int = Field(
+        title="Port",
+        description="The port of the PostgreSQL database",
+        gt=0,
+        le=65535,
+    )
+    database: str = Field(
+        title="Database",
+        description="The name of the PostgreSQL database",
+        min_length=1,
+    )
+    user: str = Field(
+        title="Username",
+        description="The username for the PostgreSQL database",
+        min_length=1,
+    )
+    password: str = Field(
+        title="Password",
+        description="The password for the PostgreSQL database",
+        min_length=1,
+    )
+    db_schema: str = Field(
+        default="public",
+        alias="schema",
+        title="Schema",
+        description="The schema of the PostgreSQL database",
+        min_length=1,
+    )
+    tables: str = Field(
+        default="*",
+        title="Tables",
+        description=(
+            "Comma separated list of tables and views to sync. For example, 'users,orders'. "
+            "For all tables (not views), use '*'."
+        ),
+        min_length=1,
+    )
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        """Validate database host."""
+        if not v or not v.strip():
+            raise ValueError("Host is required")
+        v = v.strip()
+        # Host should not include protocol
+        if v.startswith(("http://", "https://", "postgresql://", "mysql://")):
+            raise ValueError(
+                "Host should not include protocol (e.g., use 'localhost' not 'postgresql://localhost')"
+            )
+        validate_host(v)
+        return v
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        """Validate database port."""
+        if v <= 0 or v > 65535:
+            raise ValueError("Port must be between 1 and 65535")
+        return v
+
+    @field_validator("database", "user", "password", "db_schema")
+    @classmethod
+    def validate_not_empty(cls, v: str, info: ValidationInfo) -> str:
+        """Validate that required fields are not empty."""
+        if not v or not v.strip():
+            field_name = (info.field_name or "").replace("_", " ").title()
+            raise ValueError(f"{field_name} is required")
+        return v.strip()
+
+    @field_validator("tables")
+    @classmethod
+    def validate_tables(cls, v: str) -> str:
+        """Validate tables list."""
+        if not v or not v.strip():
+            raise ValueError("Tables field is required (use '*' for all tables)")
+        v = v.strip()
+        # Allow * for all tables, or comma-separated list
+        if v == "*":
+            return v
+        # Split by comma and validate each table name
+        tables = [t.strip() for t in v.split(",")]
+        for table in tables:
+            if not table:
+                raise ValueError("Empty table name in list")
+            # Basic validation - alphanumeric, underscore, and dot (for schema.table)
+            if not all(c.isalnum() or c in "._" for c in table):
+                raise ValueError(
+                    f"Invalid table name '{table}'. "
+                    "Use alphanumeric characters, underscores, and dots only"
+                )
+        return v
+
+
+# Destination auth configs
+class WeaviateAuthConfig(AuthConfig):
+    """Weaviate authentication credentials schema."""
+
+    cluster_url: str = Field(title="Cluster URL", description="The URL of the Weaviate cluster")
+    api_key: str = Field(title="API Key", description="The API key for the Weaviate cluster")
+
+    @field_validator("cluster_url")
+    @classmethod
+    def validate_cluster_url_ssrf(cls, v: str) -> str:
+        """Validate cluster URL is not targeting internal resources."""
+        return validate_url(v)
+
+
+class Neo4jAuthConfig(AuthConfig):
+    """Neo4j authentication credentials schema."""
+
+    uri: str = Field(title="URI", description="The URI of the Neo4j database")
+    username: str = Field(title="Username", description="The username for the Neo4j database")
+    password: str = Field(title="Password", description="The password for the Neo4j database")
+
+    @field_validator("uri")
+    @classmethod
+    def validate_uri_ssrf(cls, v: str) -> str:
+        """Validate the host component of the Neo4j URI."""
+        parsed = urlparse(v)
+        if parsed.hostname:
+            validate_host(parsed.hostname)
+        return v
+
+
+# AUTH CONFIGS FOR ALL SOURCES
+
+
+class AirtableAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Airtable authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class AsanaAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Asana authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class ApolloAuthConfig(APIKeyAuthConfig):
+    """Apollo authentication credentials schema.
+
+    Use your Apollo API key (Settings > API in Apollo). Master API key is
+    required for Sequences and Email Activities.
+    """
+
+    api_key: str = Field(
+        title="API Key",
+        description="The API key for Apollo. Create in Apollo: Settings > API.",
+        min_length=10,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Apollo API key."""
+        if not v or not v.strip():
+            raise ValueError("API key is required")
+        return v.strip()
+
+
+class AttioAuthConfig(APIKeyAuthConfig):
+    """Attio authentication credentials schema."""
+
+    api_key: str = Field(
+        title="API Key",
+        description="The API key for Attio. Generate one in Workspace Settings > Developers.",
+        min_length=10,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Attio API key."""
+        if not v or not v.strip():
+            raise ValueError("API key is required")
+        v = v.strip()
+        # Check for common placeholder values
+        placeholder_values = ["your-api-key", "xxx", "api-key-here", "paste-here", "placeholder"]
+        if any(placeholder in v.lower() for placeholder in placeholder_values):
+            raise ValueError("Please enter your actual API key, not a placeholder value")
+        return v
+
+
+class SliteAuthConfig(APIKeyAuthConfig):
+    """Slite authentication credentials schema.
+
+    API key from Slite Settings > API (Create a new key). The key is shown only once.
+    """
+
+    api_key: str = Field(
+        title="API Key",
+        description=(
+            "Slite API key. Generate in your organization: Settings > API > Create a new key."
+        ),
+        min_length=1,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Slite API key."""
+        if not v or not v.strip():
+            raise ValueError("API key is required")
+        return v.strip()
+
+
+class BitbucketAuthConfig(AuthConfig):
+    """Bitbucket authentication credentials schema.
+
+    For direct (API token) auth, provide access_token + email.
+    For OAuth via auth providers, only access_token is required;
+    workspace and repo_slug come from the source config instead.
+    """
+
+    access_token: str = Field(
+        title="API Token",
+        description=(
+            "Create a Bitbucket API token "
+            "[here](https://id.atlassian.com/manage-profile/security/api-tokens) "
+            "with scopes:\n"
+            "- account\n"
+            "- read:user:bitbucket\n"
+            "- read:workspace:bitbucket\n"
+            "- read:repository:bitbucket\n\n"
+            "When using this, also provide your Atlassian email address."
+        ),
+        min_length=10,
+    )
+
+    email: Optional[str] = Field(
+        default=None,
+        title="Email",
+        description="Your Atlassian email address (required for API token auth, "
+        "not needed for OAuth)",
+    )
+
+    workspace: Optional[str] = Field(
+        default=None,
+        title="Workspace",
+        description="Bitbucket workspace slug (e.g., 'my-workspace'). "
+        "Can also be set in source config.",
+        pattern=r"^[a-zA-Z0-9_-]+$",
+    )
+    repo_slug: Optional[str] = Field(
+        default="",
+        title="Repository Slug",
+        description="Specific repository to sync (e.g., 'my-repo'). "
+        "If empty, syncs all repositories in the workspace.",
+        pattern=r"^[a-zA-Z0-9_.-]*$",
+    )
+
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> Self:
+        """Ensure access_token is provided."""
+        if not self.access_token or not self.access_token.strip():
+            raise ValueError("API token is required")
+        return self
+
+
+class BoxAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Box authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class ClickUpAuthConfig(OAuth2AuthConfig):
+    """Clickup authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class CodaAuthConfig(APIKeyAuthConfig):
+    """Coda authentication credentials schema.
+
+    Uses Personal API Token from Coda Account settings (Generate API token).
+    Pipedream maps this to their 'api_token' via SOURCE_FIELD_MAPPING in PipedreamAuthProvider.
+    """
+
+    api_key: str = Field(
+        title="Personal API Token",
+        description="Coda Personal API Token from Account settings",
+        min_length=10,
+    )
+
+
+class ConfluenceAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Confluence authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class Document360AuthConfig(AuthConfig):
+    """Document360 authentication credentials schema.
+
+    Uses API token from Settings > Knowledge base portal > API tokens.
+    """
+
+    api_token: str = Field(
+        title="API Token",
+        description=(
+            "Document360 API token. Generate from Settings > Knowledge base portal > API tokens."
+        ),
+        min_length=10,
+    )
+
+    @field_validator("api_token")
+    @classmethod
+    def validate_api_token(cls, v: str) -> str:
+        """Validate Document360 API token."""
+        if not v or not v.strip():
+            raise ValueError("API token is required")
+        return v.strip()
+
+
+class DropboxAuthConfig(OAuth2BYOCAuthConfig):
+    """Dropbox authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class FirefliesAuthConfig(APIKeyAuthConfig):
+    """Fireflies authentication credentials schema.
+
+    API key from https://app.fireflies.ai/integrations (API & Webhooks).
+    """
+
+
+class ElasticsearchAuthConfig(AuthConfig):
+    """Elasticsearch authentication credentials schema."""
+
+    host: str = Field(
+        title="Host",
+        description="The full URL to the Elasticsearch server, including http or https",
+    )
+    port: int = Field(title="Port", description="The port of the elasticsearch database")
+    indices: str = Field(
+        default="*",
+        title="Indices",
+        description="Comma separated list of indices to sync. Use '*' for all indices.",
+    )
+    fields: str = Field(
+        default="*",
+        title="Fields",
+        description="List of fields to sync from each document. For all fields, use '*'",
+    )
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        """Validate that the host URL starts with http:// or https://."""
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Host must start with http:// or https://")
+        validate_url(v)
+        return v
+
+
+class GitHubAuthConfig(AuthConfig):
+    """GitHub authentication credentials schema."""
+
+    personal_access_token: str = Field(
+        title="Personal Access Token",
+        description="GitHub PAT with read rights (code, contents, metadata) to the repository",
+        min_length=4,
+    )
+
+    @field_validator("personal_access_token")
+    @classmethod
+    def validate_personal_access_token(cls, v: str) -> str:
+        """Validate GitHub personal access token format."""
+        if not v or not v.strip():
+            raise ValueError("Personal access token is required")
+        v = v.strip()
+        # GitHub classic tokens start with ghp_, fine-grained tokens start with github_pat_
+        # Also allow legacy tokens (40 char hex)
+        if not (
+            v.startswith("ghp_")
+            or v.startswith("github_pat_")
+            or v.startswith("gho_")
+            or (len(v) == 40 and all(c in "0123456789abcdef" for c in v.lower()))
+        ):
+            raise ValueError(
+                "Invalid token format. Expected format: "
+                "ghp_... or github_pat_... or gho_... or 40-character hex"
+            )
+        return v
+
+
+class GmailAuthConfig(OAuth2BYOCAuthConfig):
+    """Gmail authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class GoogleCalendarAuthConfig(OAuth2BYOCAuthConfig):
+    """Google Calendar authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class GoogleDocsAuthConfig(OAuth2BYOCAuthConfig):
+    """Google Docs authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class GoogleDriveAuthConfig(OAuth2BYOCAuthConfig):
+    """Google Drive authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class GoogleSlidesAuthConfig(OAuth2BYOCAuthConfig):
+    """Google Slides authentication credentials schema."""
+
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class GitLabAuthConfig(OAuth2WithRefreshAuthConfig):
+    """GitLab authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class HubspotAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Hubspot authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class IntercomAuthConfig(OAuth2AuthConfig):
+    """Intercom authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class SalesforceAuthConfig(OAuth2BYOCAuthConfig):
+    """Salesforce authentication credentials schema."""
+
+    # instance_url is now in SalesforceConfig as a template field
+    # Inherits client_id, client_secret, refresh_token and access_token from OAuth2BYOCAuthConfig
+
+
+class JiraAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Jira authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class LinearAuthConfig(OAuth2AuthConfig):
+    """Linear authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class MondayAuthConfig(OAuth2AuthConfig):
+    """Monday authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class MySQLAuthConfig(BaseDatabaseAuthConfig):
+    """MySQL authentication configuration."""
+
+
+class NotionAuthConfig(OAuth2AuthConfig):
+    """Notion authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class OneDriveAuthConfig(OAuth2WithRefreshAuthConfig):
+    """OneDrive authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class OracleAuthConfig(BaseDatabaseAuthConfig):
+    """Oracle authentication configuration."""
+
+
+class OutlookCalendarAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Outlook Calendar authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class OutlookMailAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Outlook Mail authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class PipedriveAuthConfig(AuthConfig):
+    """Pipedrive authentication credentials schema."""
+
+    api_token: str = Field(
+        title="API Token",
+        description="Your Pipedrive API token. Find it in Settings > Personal preferences > API.",
+        min_length=10,
+    )
+
+    @field_validator("api_token")
+    @classmethod
+    def validate_api_token(cls, v: str) -> str:
+        """Validate Pipedrive API token."""
+        if not v or not v.strip():
+            raise ValueError("API token is required")
+        return v.strip()
+
+
+class OneNoteAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Microsoft OneNote authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class WordAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Microsoft Word authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class ZoomAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Zoom authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class CTTIAuthConfig(AuthConfig):
+    """CTTI Clinical Trials authentication credentials schema."""
+
+    username: str = Field(
+        title="Username",
+        description="Username for the AACT Clinical Trials database",
+        min_length=1,
+    )
+    password: str = Field(
+        title="Password",
+        description="Password for the AACT Clinical Trials database",
+        min_length=1,
+    )
+
+    @field_validator("username", "password")
+    @classmethod
+    def validate_not_empty(cls, v: str, info: ValidationInfo) -> str:
+        """Validate that username and password are not empty."""
+        if not v or not v.strip():
+            field_name = (info.field_name or "").replace("_", " ").title()
+            raise ValueError(f"{field_name} is required")
+        return v.strip()
+
+
+class SharePointAuthConfig(OAuth2WithRefreshAuthConfig):
+    """SharePoint authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class SharePoint2019V2AuthConfig(AuthConfig):
+    r"""SharePoint 2019 On-Premise authentication config using NTLM + LDAP.
+
+    SharePoint 2019 on-premise uses NTLM authentication for the SharePoint REST API.
+    LDAP credentials are required to query Active Directory for resolving SIDs to
+    sAMAccountNames and for expanding group memberships in the access control graph.
+
+    Both SharePoint and AD credentials are required for sync to work correctly.
+    """
+
+    # SharePoint NTLM credentials (required)
+    sharepoint_username: str = Field(
+        title="SharePoint Username",
+        description="Windows username for NTLM authentication (e.g., 'jdoe' or 'DOMAIN\\jdoe')",
+    )
+    sharepoint_password: str = Field(
+        title="SharePoint Password",
+        description="Password for SharePoint NTLM authentication",
+    )
+    sharepoint_domain: str = Field(
+        title="SharePoint Domain",
+        description="Windows domain for NTLM authentication (e.g., 'CONTOSO')",
+    )
+
+    # Active Directory LDAP credentials (required for SID resolution)
+    ad_username: str = Field(
+        title="AD Username",
+        description="Active Directory username for LDAP queries (e.g., 'admin')",
+    )
+    ad_password: str = Field(
+        title="AD Password",
+        description="Password for Active Directory LDAP authentication",
+    )
+    ad_domain: str = Field(
+        title="AD Domain",
+        description="Active Directory domain (e.g., 'CONTOSO' or 'contoso.local')",
+    )
+
+
+class ShopifyAuthConfig(AuthConfig):
+    """Shopify authentication credentials schema using client credentials grant.
+
+    Uses client_id and client_secret to obtain an access token via OAuth 2.0
+    client credentials flow. The token is exchanged for Admin API access.
+    """
+
+    client_id: str = Field(
+        title="Client ID",
+        description="Client ID from your Shopify app in the Dev Dashboard",
+        min_length=10,
+    )
+    client_secret: str = Field(
+        title="Client Secret",
+        description="Client Secret from your Shopify app in the Dev Dashboard",
+        min_length=10,
+    )
+
+
+class SharePointOnlineAppAuthConfig(AuthConfig):
+    """SharePoint Online app-only authentication using client credentials.
+
+    Uses client_id + client_secret for Microsoft Graph API calls,
+    and a certificate private key for SharePoint REST API calls.
+    Requires an Azure AD app registration with application permissions
+    and admin consent.
+    """
+
+    tenant_id: str = Field(
+        title="Tenant ID",
+        description="Azure AD tenant ID (e.g., 'contoso.onmicrosoft.com' or a UUID)",
+        min_length=1,
+    )
+    client_id: str = Field(
+        title="Client ID",
+        description="Application (client) ID from the Azure AD app registration",
+        min_length=1,
+    )
+    client_secret: str = Field(
+        title="Client Secret",
+        description="Client secret from the Azure AD app registration (for Graph API)",
+        min_length=1,
+        json_schema_extra={"is_secret": True},
+    )
+    private_key: str = Field(
+        title="Private Key (PEM)",
+        description=(
+            "PEM-encoded private key for certificate authentication "
+            "(for SharePoint REST API). Starts with '-----BEGIN PRIVATE KEY-----'"
+        ),
+        min_length=1,
+        json_schema_extra={"is_secret": True},
+    )
+    certificate: str = Field(
+        default="",
+        title="Certificate (PEM)",
+        description=(
+            "PEM-encoded certificate that was uploaded to the Azure AD app registration. "
+            "Used to compute the x5t thumbprint for SP REST API token exchange. "
+            "If omitted, SP site group expansion will not work."
+        ),
+        json_schema_extra={"is_secret": True},
+    )
+
+
+class ServiceNowAuthConfig(AuthConfig):
+    """ServiceNow instance authentication credentials schema.
+
+    Uses Basic Auth with instance URL (or subdomain), username, and password.
+    Provide either full instance URL or subdomain (e.g. your-instance for
+    https://your-instance.service-now.com). Composio returns subdomain.
+    """
+
+    url: Optional[str] = Field(
+        default=None,
+        title="Instance URL",
+        description="Your ServiceNow instance URL (e.g. https://your-instance.service-now.com)",
+        min_length=1,
+    )
+    subdomain: Optional[str] = Field(
+        default=None,
+        title="Instance subdomain",
+        description="Instance subdomain (e.g. your-instance). Used to build URL if url is not set.",
+        min_length=1,
+    )
+    username: str = Field(
+        title="Username",
+        description="ServiceNow username for API access",
+        min_length=1,
+    )
+    password: str = Field(
+        title="Password",
+        description="ServiceNow password for API access",
+        min_length=1,
+    )
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_ssrf(cls, v: Optional[str]) -> Optional[str]:
+        """Validate URL is not targeting internal resources."""
+        if v is not None:
+            validate_url(v)
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def url_or_subdomain(cls, data: Any) -> Any:
+        """Set url from subdomain when url is not provided (so __init__ receives url)."""
+        if not isinstance(data, dict):
+            return data
+        url = data.get("url")
+        subdomain = data.get("subdomain")
+        if url:
+            return data
+        if subdomain:
+            base = str(subdomain).strip().rstrip("/")
+            if "://" in base:
+                data = {**data, "url": base}
+            else:
+                data = {**data, "url": f"https://{base}.service-now.com"}
+            return data
+        raise ValueError("Either 'url' or 'subdomain' must be provided")
+
+
+class SlabAuthConfig(APIKeyAuthConfig):
+    """Slab authentication credentials schema."""
+
+    api_key: str = Field(
+        title="API Token",
+        description="Your Slab API token. Generate one in Settings > Developer Tools > API Tokens.",
+        min_length=10,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Slab API token."""
+        if not v or not v.strip():
+            raise ValueError("API token is required")
+        v = v.strip()
+        # Reject only exact placeholder values (after normalization), not tokens that contain them
+        placeholder_values = [
+            "your-api-token",
+            "xxx",
+            "api-token-here",
+            "paste-here",
+            "placeholder",
+        ]
+        if v.lower() in {p.lower() for p in placeholder_values}:
+            raise ValueError("Please enter your actual API token, not a placeholder value")
+        return v
+
+
+class SlackAuthConfig(OAuth2AuthConfig):
+    """Slack authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class SQLServerAuthConfig(BaseDatabaseAuthConfig):
+    """SQL Server authentication configuration."""
+
+
+class SQLiteAuthConfig(BaseDatabaseAuthConfig):
+    """SQLite authentication configuration."""
+
+
+class StripeAuthConfig(AuthConfig):
+    """Stripe authentication credentials schema."""
+
+    api_key: str = Field(
+        title="API Key",
+        description="The API key for the Stripe account. Should start with 'sk_test_' for test mode"
+        " or 'sk_live_' for live mode.",
+        pattern="^sk_(test|live)_[A-Za-z0-9]+$",
+        min_length=20,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Stripe API key format."""
+        if not v or not v.strip():
+            raise ValueError("API key is required")
+        v = v.strip()
+        if not v.startswith(("sk_test_", "sk_live_")):
+            raise ValueError("Stripe API key must start with 'sk_test_' or 'sk_live_'")
+        return v
+
+
+class CalComAuthConfig(APIKeyAuthConfig):
+    """Cal.com authentication credentials schema.
+
+    Uses a Cal.com API key (Settings → Security). Keys typically start with
+    `cal_` (test mode) or `cal_live_` (live mode).
+    """
+
+    api_key: str = Field(
+        title="API Key",
+        description=(
+            "Cal.com API key. Generate it from your Cal.com Settings → Security page. "
+            "Test keys start with 'cal_' and live keys with 'cal_live_'."
+        ),
+        min_length=10,
+    )
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate Cal.com API key."""
+        if not v or not v.strip():
+            raise ValueError("API key is required")
+        return v.strip()
+
+
+class FreshdeskAuthConfig(AuthConfig):
+    """Freshdesk authentication credentials schema.
+
+    Uses API key as Basic auth username (password is 'X').
+    See: https://developers.freshdesk.com/api/#authentication
+    """
+
+    api_key: str = Field(
+        title="API Key",
+        description="Your Freshdesk API key. Find it in Profile Settings in your Freshdesk portal.",
+        min_length=1,
+    )
+
+
+class TodoistAuthConfig(OAuth2AuthConfig):
+    """Todoist authentication credentials schema."""
+
+    # Inherits access_token from OAuth2AuthConfig
+
+
+class TeamsAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Microsoft Teams authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class TrelloAuthConfig(AuthConfig):
+    """Trello authentication credentials schema.
+
+    Trello uses OAuth1, which requires both a token and token secret.
+    """
+
+    oauth_token: str = Field(
+        title="OAuth Token",
+        description="The OAuth1 access token for Trello",
+    )
+    oauth_token_secret: str = Field(
+        title="OAuth Token Secret",
+        description="The OAuth1 access token secret for Trello",
+    )
+
+
+# AUTH PROVIDER AUTHENTICATION CONFIGS
+# These are for authenticating TO auth providers themselves
+
+
+class ComposioAuthConfig(APIKeyAuthConfig):
+    """Composio Auth Provider authentication credentials schema."""
+
+    api_key: str = Field(
+        title="API Key",
+        description="Your Composio API key.",
+    )
+
+
+class PipedreamAuthConfig(AuthConfig):
+    """Pipedream Auth Provider authentication credentials schema.
+
+    Pipedream uses OAuth2 client credentials flow for API authentication.
+    The access tokens expire after 3600 seconds (1 hour).
+    """
+
+    client_id: str = Field(
+        title="Client ID",
+        description="Your Pipedream OAuth client ID.",
+    )
+    client_secret: str = Field(
+        title="Client Secret",
+        description="Your Pipedream OAuth client secret.",
+    )
+
+
+class CustomAuthConfig(AuthConfig):
+    """Custom Auth Provider authentication credentials schema.
+
+    Stores a base URL and API key for a customer-hosted token endpoint.
+    Connector Context calls GET {base_url}/{source_connection_id} to fetch credentials
+    for each source connection. The customer is responsible for returning fresh tokens.
+
+    Contract:
+    - GET {base_url} must return 2xx (used for validation)
+    - GET {base_url}/{source_connection_id} must return JSON with credentials
+    - source_connection_id is the UUID of the source connection in Connector Context
+    - All requests include an X-API-Key header for authentication
+    - No refresh_token needed — Connector Context re-fetches automatically
+
+    Response format (only two shapes):
+    - Token-based sources (OAuth, PATs): {"access_token": "..."}
+    - API key sources (Stripe, etc.):   {"api_key": "..."}
+    """
+
+    base_endpoint_url: str = Field(
+        title="Endpoint Base URL",
+        description=(
+            "Base URL of your token endpoint. "
+            "Connector Context calls GET {base_url}/{source_connection_id} for each "
+            "source connection and expects a JSON response with the credential "
+            'the source needs (e.g. {"access_token": "..."} for OAuth sources). '
+            "No refresh_token needed — Connector Context re-fetches automatically. "
+            "GET {base_url} must return 2xx for validation."
+        ),
+    )
+    api_key: str = Field(
+        title="API Key",
+        description=(
+            "API key sent as X-API-Key header to authenticate all requests to your endpoint."
+        ),
+    )
+
+    @field_validator("base_endpoint_url")
+    @classmethod
+    def validate_base_endpoint_url(cls, v: str) -> str:
+        """Validate the endpoint URL for SSRF safety."""
+        if not v or not v.strip():
+            raise ValueError("base_endpoint_url is required")
+        v = v.strip().rstrip("/")
+        validate_url(v)
+        return v
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        """Validate that api_key is non-empty."""
+        if not v or not v.strip():
+            raise ValueError("api_key is required")
+        return v.strip()
+
+
+class ZohoCRMAuthConfig(OAuth2WithRefreshAuthConfig):
+    """Zoho CRM authentication credentials schema."""
+
+    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
+
+
+class StubAuthConfig(AuthConfig):
+    """Stub source authentication credentials schema.
+
+    The stub source doesn't require real authentication.
+    This config is a placeholder for consistency with other sources.
+    """
+
+    # Dummy field to satisfy frontend validation (can be left empty)
+    stub_key: str = Field(
+        default="stub",
+        title="Stub Key",
+        description="Placeholder field (any value works, stub source doesn't require "
+        "real authentication)",
+    )
+
+
+class TimedAuthConfig(AuthConfig):
+    """Timed source authentication credentials schema.
+
+    The timed source doesn't require real authentication.
+    This config is a placeholder for consistency with other sources.
+    """
+
+    timed_key: str = Field(
+        default="timed",
+        title="Timed Key",
+        description="Placeholder field (any value works, timed source doesn't require "
+        "real authentication)",
+    )
+
+
+class FileStubAuthConfig(AuthConfig):
+    """File stub source authentication credentials schema.
+
+    Like StubAuthConfig, this is a placeholder for consistency.
+    """
+
+    stub_key: str = Field(
+        default="file-stub",
+        title="File Stub Key",
+        description="Placeholder field (any value works)",
+    )
+
+
+class SnapshotAuthConfig(BaseConfig):
+    """Optional authentication for blob storage access.
+
+    For local filesystem paths, no auth is needed.
+    For Azure blob URLs, provide either:
+    - SAS token for direct blob access
+    - Or rely on DefaultAzureCredential (az login)
+    """
+
+    # Placeholder to satisfy DirectAuthentication's non-empty credentials requirement
+    placeholder: str = Field(
+        default="snapshot",
+        title="Placeholder",
+        description="Internal placeholder (ignored)",
+        json_schema_extra={"exclude_from_ui": True},
+    )
+
+    sas_token: Optional[str] = Field(
+        default=None,
+        title="SAS Token",
+        description=(
+            "Azure SAS token for blob storage access. "
+            "If not provided, uses DefaultAzureCredential (az login)."
+        ),
+    )
+
+
+class HerbAuthConfig(BaseConfig):
+    """Placeholder authentication for HERB benchmark sources (no real credentials needed)."""
+
+    placeholder: str = Field(
+        default="herb",
+        title="Placeholder",
+        description="Internal placeholder (ignored)",
+    )
+
+
+class EnronAuthConfig(BaseConfig):
+    """Placeholder authentication for the Enron email corpus (no real credentials needed)."""
+
+    placeholder: str = Field(
+        default="enron",
+        title="Placeholder",
+        description="Internal placeholder (ignored)",
+    )

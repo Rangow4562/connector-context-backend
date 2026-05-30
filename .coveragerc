@@ -1,0 +1,9 @@
+[run]
+omit =
+    connector_context/platform/sources/*
+    connector_context/platform/entities/*
+    connector_context/domains/sources/*
+    connector_context/domains/entities/*
+    **/fake.py
+    **/fakes/*
+    **/tests/*

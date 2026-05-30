@@ -1,0 +1,234 @@
+"""Core PostHog analytics service for Connector Context."""
+
+from typing import Any, Dict, Optional
+
+import posthog
+
+from connector_context.core.config import settings
+from connector_context.core.logging import logger
+
+
+class AnalyticsService:
+    """Centralized analytics service for PostHog integration.
+
+    Handles all PostHog interactions and provides a clean interface
+    for tracking events throughout the Connector Context application.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the analytics service with PostHog configuration."""
+        # Enable analytics by default unless in local environment
+        self.enabled = settings.ANALYTICS_ENABLED and settings.ENVIRONMENT != "local"
+        self.logger = logger.with_context(component="analytics")
+
+        if self.enabled:
+            posthog.api_key = settings.POSTHOG_API_KEY
+            posthog.host = settings.POSTHOG_HOST
+            self.logger.info(f"PostHog analytics initialized (environment: {settings.ENVIRONMENT})")
+        else:
+            self.logger.info(
+                f"PostHog analytics disabled (environment: {settings.ENVIRONMENT}, "
+                f"enabled: {settings.ANALYTICS_ENABLED})"
+            )
+
+    def _get_deployment_type(self) -> str:
+        """Determine if this is hosted platform or self-hosted deployment.
+
+        Returns:
+            str: "hosted" for app.connector-context.ai, "self_hosted" for other deployments
+        """
+        if settings.ENVIRONMENT == "prd" and settings.APP_FULL_URL is None:
+            return "hosted"  # Production Connector Context hosted platform
+        return "self_hosted"  # All other deployments (local, dev, test, custom)
+
+    def _get_deployment_identifier(self) -> str:
+        """Get a unique identifier for this deployment.
+
+        Returns:
+            str: Unique identifier for the deployment
+        """
+        if settings.ENVIRONMENT == "prd" and settings.APP_FULL_URL is None:
+            return "connector-context-hosted"  # Official hosted platform
+        elif settings.API_FULL_URL:
+            return f"custom-{settings.API_FULL_URL}"  # Custom deployment
+        else:
+            return f"{settings.ENVIRONMENT}-{settings.API_FULL_URL or 'default'}"
+
+    def identify_user(self, user_id: str, properties: Dict[str, Any]) -> None:
+        """Identify a user with properties.
+
+        Args:
+        ----
+            user_id: Unique identifier for the user
+            properties: User properties to set
+        """
+        if not self.enabled:
+            return
+
+        try:
+            # Create a copy to avoid mutating the caller's properties dict
+            user_properties = dict(properties) if properties else {}
+            user_properties.update(
+                {
+                    "environment": settings.ENVIRONMENT,
+                    "deployment_type": self._get_deployment_type(),
+                    "deployment_id": self._get_deployment_identifier(),
+                    "is_hosted_platform": self._get_deployment_type() == "hosted",
+                    "api_url": settings.api_url,
+                    "app_url": settings.app_url,
+                }
+            )
+
+            posthog.capture(
+                distinct_id=user_id, event="$identify", properties={"$set": user_properties}
+            )
+            self.logger.debug(f"User identified: {user_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to identify user {user_id}: {e}")
+
+    @staticmethod
+    def _enrich_from_ctx(
+        ctx: Any,
+        event_properties: Dict[str, Any],
+        distinct_id: Optional[str],
+        groups: Optional[Dict[str, str]],
+    ) -> tuple[str | None, Dict[str, str] | None]:
+        """Extract distinct_id, groups, and metadata from a request context."""
+        if distinct_id is None:
+            user = getattr(ctx, "user", None)
+            if user:
+                distinct_id = str(user.id)
+            else:
+                distinct_id = f"api_key_{ctx.organization.id}"
+
+        if groups is None:
+            groups = {"organization": str(ctx.organization.id)}
+
+        auth_method = getattr(ctx, "auth_method", None)
+        if auth_method is not None:
+            event_properties.setdefault(
+                "auth_method",
+                auth_method.value if hasattr(auth_method, "value") else str(auth_method),
+            )
+        event_properties.setdefault("organization_name", ctx.organization.name)
+
+        request_id = getattr(ctx, "request_id", None)
+        if request_id:
+            event_properties.setdefault("request_id", request_id)
+
+        headers = getattr(ctx, "headers", None)
+        if headers:
+            event_properties.update(headers.to_dict())
+            if headers.session_id:
+                event_properties["$session_id"] = headers.session_id
+
+        return distinct_id, groups
+
+    def track_event(
+        self,
+        event_name: str,
+        properties: Optional[Dict[str, Any]] = None,
+        *,
+        ctx: Optional[Any] = None,
+        distinct_id: Optional[str] = None,
+        groups: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Track an event with optional properties and groups.
+
+        When ``ctx`` (an ApiContext / BaseContext) is provided, distinct_id,
+        groups, and request metadata (auth_method, org name, headers) are
+        extracted automatically.  Explicit ``distinct_id`` / ``groups`` take
+        precedence over values derived from ctx.
+
+        Args:
+            event_name: Name of the event to track.
+            properties: Event properties.
+            ctx: Optional context — enriches event with org/auth/header info.
+            distinct_id: Unique identifier for the user/entity.
+            groups: Group associations (e.g., organization).
+        """
+        if not self.enabled:
+            return
+
+        event_properties = dict(properties) if properties else {}
+
+        if ctx is not None:
+            distinct_id, groups = self._enrich_from_ctx(
+                ctx,
+                event_properties,
+                distinct_id,
+                groups,
+            )
+
+        if distinct_id is None:
+            self.logger.warning(
+                f"track_event({event_name!r}) called without distinct_id or ctx; event dropped"
+            )
+            return
+
+        try:
+            event_properties.update(
+                {
+                    "environment": settings.ENVIRONMENT,
+                    "deployment_type": self._get_deployment_type(),
+                    "deployment_id": self._get_deployment_identifier(),
+                    "is_hosted_platform": self._get_deployment_type() == "hosted",
+                    "api_url": settings.api_url,
+                    "app_url": settings.app_url,
+                }
+            )
+
+            posthog.capture(
+                distinct_id=distinct_id,
+                event=event_name,
+                properties=event_properties,
+                groups=groups or {},
+            )
+            self.logger.debug(f"Event tracked: {event_name} for {distinct_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to track event {event_name}: {e}")
+
+    def set_group_properties(
+        self, group_type: str, group_key: str, properties: Dict[str, Any]
+    ) -> None:
+        """Set properties for a group (e.g., organization).
+
+        Args:
+        ----
+            group_type: Type of group (e.g., 'organization')
+            group_key: Unique identifier for the group
+            properties: Properties to set for the group
+        """
+        if not self.enabled:
+            return
+
+        try:
+            # Create a copy to avoid mutating the caller's properties dict
+            group_properties = dict(properties) if properties else {}
+            group_properties.update(
+                {
+                    "environment": settings.ENVIRONMENT,
+                    "deployment_type": self._get_deployment_type(),
+                    "deployment_id": self._get_deployment_identifier(),
+                    "is_hosted_platform": self._get_deployment_type() == "hosted",
+                    "api_url": settings.api_url,
+                    "app_url": settings.app_url,
+                }
+            )
+
+            posthog.capture(
+                distinct_id=group_key,
+                event="$groupidentify",
+                properties={
+                    "$group_type": group_type,
+                    "$group_key": group_key,
+                    "$group_set": group_properties,
+                },
+            )
+            self.logger.debug(f"Group properties set: {group_type}:{group_key}")
+        except Exception as e:
+            self.logger.error(f"Failed to set group properties for {group_type}:{group_key}: {e}")
+
+
+# Global analytics service instance
+analytics = AnalyticsService()

@@ -1,0 +1,52 @@
+"""Fake sync job service for testing."""
+
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from connector_context.api.context import ApiContext
+from connector_context.core.shared_models import SourceConnectionErrorCategory, SyncJobStatus
+from connector_context.domains.sync_pipeline.pipeline.entity_tracker import SyncStats
+
+
+class FakeSyncJobService:
+    """In-memory fake for SyncJobServiceProtocol."""
+
+    def __init__(self) -> None:
+        """Initialize with empty call log."""
+        self._calls: list[tuple] = []
+        self._should_raise: Optional[Exception] = None
+
+    def set_error(self, error: Exception) -> None:
+        """Make all subsequent calls raise this error."""
+        self._should_raise = error
+
+    async def update_status(
+        self,
+        sync_job_id: UUID,
+        status: SyncJobStatus,
+        ctx: ApiContext,
+        stats: Optional[SyncStats] = None,
+        error: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        failed_at: Optional[datetime] = None,
+        error_category: Optional[SourceConnectionErrorCategory] = None,
+    ) -> None:
+        """Record call."""
+        self._calls.append(
+            (
+                "update_status",
+                sync_job_id,
+                status,
+                ctx,
+                stats,
+                error,
+                started_at,
+                completed_at,
+                failed_at,
+                error_category,
+            )
+        )
+        if self._should_raise:
+            raise self._should_raise

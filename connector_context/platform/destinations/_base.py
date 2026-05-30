@@ -1,0 +1,173 @@
+"""Base destination classes."""
+
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar, Dict, List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel
+
+from connector_context.core.logging import ContextualLogger
+from connector_context.core.logging import logger as default_logger
+from connector_context.platform.entities._base import BaseEntity
+from connector_context.schemas.search import ConnectorContextTemporalConfig
+from connector_context.schemas.search_result import ConnectorContextSearchResult
+
+
+class BaseDestination(ABC):
+    """Common base destination class. This is the umbrella interface for all destinations."""
+
+    # Identity (set by @destination decorator)
+    is_destination: ClassVar[bool] = False
+    destination_name: ClassVar[str] = ""
+    short_name: ClassVar[str] = ""
+    auth_config_class: ClassVar[Optional[type[BaseModel]]] = None
+    config_class: ClassVar[Optional[type[BaseModel]]] = None
+
+    # Capabilities (set by @destination decorator)
+    supports_upsert: ClassVar[bool] = True
+    supports_delete: ClassVar[bool] = True
+    supports_vector: ClassVar[bool] = False
+    max_batch_size: ClassVar[int] = 1000
+    requires_client_embedding: ClassVar[bool] = True
+    supports_temporal_relevance: ClassVar[bool] = True
+
+    # Class variables for integration metadata
+    _labels: ClassVar[List[str]] = []
+
+    def __init__(self, soft_fail: bool = False):
+        """Initialize the base destination.
+
+        Args:
+            soft_fail: If True, errors won't fail the sync (for migrations)
+        """
+        self._logger: Optional[ContextualLogger] = (
+            None  # Store contextual logger as instance variable
+        )
+        self.soft_fail = soft_fail
+
+    @property
+    def logger(self) -> ContextualLogger:
+        """Get the logger for this destination, falling back to default if not set."""
+        if self._logger is not None:
+            return self._logger
+        # Return a real default logger
+        return default_logger
+
+    def set_logger(self, logger: ContextualLogger) -> None:
+        """Set a contextual logger for this destination."""
+        self._logger = logger
+
+    @classmethod
+    @abstractmethod
+    async def create(
+        cls,
+        credentials: Optional[Any],
+        config: Optional[dict],
+        collection_id: UUID,
+        organization_id: Optional[UUID] = None,
+        logger: Optional[ContextualLogger] = None,
+    ) -> "BaseDestination":
+        """Create a new destination with credentials and config (matches source pattern).
+
+        Args:
+            credentials: Authentication credentials
+            config: Configuration parameters (e.g., bucket_name, url)
+            collection_id: Collection UUID
+            organization_id: Organization UUID
+            logger: Logger instance
+        """
+        pass
+
+    @abstractmethod
+    async def setup_collection(self, collection_id: UUID, vector_size: int) -> None:
+        """Set up the collection for storing entities."""
+        pass
+
+    @abstractmethod
+    async def bulk_insert(self, entities: list[BaseEntity]) -> None:
+        """Bulk insert entities into the destination."""
+        pass
+
+    @abstractmethod
+    async def delete_by_sync_id(self, sync_id: UUID) -> None:
+        """Delete entities from the destination by sync ID."""
+        pass
+
+    @abstractmethod
+    async def bulk_delete_by_parent_ids(self, parent_ids: list[str], sync_id: UUID) -> None:
+        """Bulk delete entities for multiple parent IDs within a given sync."""
+        pass
+
+    @abstractmethod
+    async def search(
+        self,
+        queries: List[str],
+        connector_context_collection_id: UUID,
+        limit: int,
+        offset: int,
+        filter: Optional[Dict[str, Any]] = None,
+        dense_embeddings: Optional[List[List[float]]] = None,
+        sparse_embeddings: Optional[List[Any]] = None,
+        retrieval_strategy: str = "hybrid",
+        temporal_config: Optional[ConnectorContextTemporalConfig] = None,
+    ) -> List[ConnectorContextSearchResult]:
+        """Execute search against the destination.
+
+        This is the standard search interface that all destinations must implement.
+        Destinations handle embedding generation (if needed) and filter translation internally.
+
+        Args:
+            queries: List of search query texts (supports query expansion)
+            connector_context_collection_id: Connector Context collection UUID for multi-tenant filtering
+            limit: Maximum number of results to return
+            offset: Number of results to skip (pagination)
+            filter: Optional filter dict (Connector Context canonical format, destination translates)
+            dense_embeddings: Pre-computed dense embeddings (if client-side embedding)
+            sparse_embeddings: Pre-computed sparse embeddings for hybrid search
+            retrieval_strategy: Search strategy - "hybrid", "neural", or "keyword"
+            temporal_config: Optional temporal relevance config (destination translates)
+
+        Returns:
+            List of ConnectorContextSearchResult objects (unified format for all destinations)
+        """
+        pass
+
+    def translate_filter(self, filter: Optional[Dict[str, Any]]) -> Any:
+        """Translate Connector Context filter to destination-native format.
+
+        Default implementation is a no-op.
+        Override this method for destinations that use different filter formats.
+
+        Args:
+            filter: Connector Context canonical filter dict
+
+        Returns:
+            Destination-native filter format
+        """
+        return filter
+
+    def translate_temporal(self, config: Optional[ConnectorContextTemporalConfig]) -> Any:
+        """Translate Connector Context temporal config to destination-native format.
+
+        Default implementation is a no-op. Override for destinations that
+        require different temporal relevance configurations.
+
+        Args:
+            config: Connector Context temporal relevance configuration
+
+        Returns:
+            Destination-native temporal config (or None if not supported)
+        """
+        return config
+
+
+class VectorDBDestination(BaseDestination):
+    """Abstract base class for destinations backed by a vector database.
+
+    Inherits from BaseDestination and can have additional vector-specific methods if necessary.
+    """
+
+    @abstractmethod
+    async def get_vector_config_names(self) -> list[str]:
+        """Get the vector config names for the destination."""
+        pass

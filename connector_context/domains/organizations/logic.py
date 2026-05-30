@@ -1,0 +1,151 @@
+"""Pure business logic for the organization domain.
+
+Every function here is deterministic and performs zero I/O.
+Test with direct calls — no fixtures needed.
+"""
+
+import uuid
+from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Auth0 connection selection
+# ---------------------------------------------------------------------------
+
+DEFAULT_AUTH_CONNECTIONS = frozenset(
+    {
+        "Username-Password-Authentication",
+        "google-oauth2",
+        "github",
+    }
+)
+
+
+def select_default_connections(all_connections: list[dict]) -> list[str]:
+    """Return IDs of connections that should be auto-enabled for new orgs."""
+    return [c["id"] for c in all_connections if c.get("name") in DEFAULT_AUTH_CONNECTIONS]
+
+
+# ---------------------------------------------------------------------------
+# Org naming
+# ---------------------------------------------------------------------------
+
+
+def generate_org_name(display_name: str) -> str:
+    """Create a unique, URL-safe Auth0 org name from a display name."""
+    slug = display_name.lower().replace(" ", "-")
+    short_uuid = str(uuid.uuid4())[:8]
+    return f"connector-context-{slug}-{short_uuid}"
+
+
+# ---------------------------------------------------------------------------
+# Role determination
+# ---------------------------------------------------------------------------
+
+
+ROLE_PRIORITY: tuple[str, ...] = ("owner", "admin", "member")
+
+
+def determine_user_role(member_roles: list[dict]) -> str:
+    """Pick the highest-priority role from an identity provider roles list.
+
+    Priority: ``owner`` > ``admin`` > ``member``.
+    Falls back to ``"member"`` when the list is empty.
+    """
+    role_names: set[str] = {r["name"] for r in member_roles if r.get("name")}
+    for role in ROLE_PRIORITY:
+        if role in role_names:
+            return role
+    return "member"
+
+
+# ---------------------------------------------------------------------------
+# Permission / guard-rail checks
+# ---------------------------------------------------------------------------
+
+
+def can_user_delete_org(role: str, total_user_orgs: int) -> tuple[bool, Optional[str]]:
+    """Check whether a user may delete an organization.
+
+    Returns ``(allowed, reason)`` — reason is ``None`` when allowed.
+    """
+    if role != "owner":
+        return False, "Only organization owners can delete organizations"
+    if total_user_orgs <= 1:
+        return (
+            False,
+            "Cannot delete your only organization. Contact support to delete your account.",
+        )
+    return True, None
+
+
+def can_user_leave_org(
+    role: str, other_owner_count: int, total_user_orgs: int
+) -> tuple[bool, Optional[str]]:
+    """Check whether a user may leave an organization.
+
+    Returns ``(allowed, reason)``.
+    """
+    if total_user_orgs <= 1:
+        return (
+            False,
+            "Cannot leave your only organization. "
+            "Users must belong to at least one organization. "
+            "Delete the organization instead.",
+        )
+    if role == "owner" and other_owner_count == 0:
+        return (
+            False,
+            "Cannot leave organization as the only owner. "
+            "Transfer ownership to another member first.",
+        )
+    return True, None
+
+
+_PRIVILEGED_ROLES = frozenset({"owner", "admin"})
+
+
+def _is_privileged(role: str) -> bool:
+    return role in _PRIVILEGED_ROLES
+
+
+def can_manage_members(role: str) -> bool:
+    """Return whether a user with this role may invite / remove members."""
+    return _is_privileged(role)
+
+
+def can_manage_api_keys(role: str) -> bool:
+    """Return whether a user with this role may create/read/rotate/delete API keys."""
+    return _is_privileged(role)
+
+
+def can_manage_auth_providers(role: str) -> bool:
+    """Return whether a user with this role may create/modify/delete auth provider connections."""
+    return _is_privileged(role)
+
+
+def can_manage_webhooks(role: str) -> bool:
+    """Return whether a user with this role may manage webhook subscriptions."""
+    return _is_privileged(role)
+
+
+def can_manage_billing(role: str) -> bool:
+    """Return whether a user with this role may manage billing and subscriptions."""
+    return _is_privileged(role)
+
+
+def can_manage_rate_limits(role: str) -> bool:
+    """Return whether a user with this role may configure source rate limits."""
+    return _is_privileged(role)
+
+
+# ---------------------------------------------------------------------------
+# Invitation formatting
+# ---------------------------------------------------------------------------
+
+
+def format_role_from_invitation(invitation: dict, role_id_to_name: dict[str, str]) -> str:
+    """Map Auth0 role IDs in an invitation to a human-readable role name."""
+    role_ids = invitation.get("roles", [])
+    if role_ids:
+        return role_id_to_name.get(role_ids[0], "member")
+    return "member"

@@ -1,0 +1,166 @@
+"""Source connection repository wrapping crud.source_connection."""
+
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from connector_context import crud
+from connector_context.api.context import ApiContext
+from connector_context.db.unit_of_work import UnitOfWork
+from connector_context.domains.source_connections.protocols import SourceConnectionRepositoryProtocol
+from connector_context.domains.source_connections.types import ScheduleInfo, SourceConnectionStats
+from connector_context.domains.sources.protocols import SourceRegistryProtocol
+from connector_context.models.connection_init_session import ConnectionInitSession
+from connector_context.models.source_connection import SourceConnection
+
+
+class SourceConnectionRepository(SourceConnectionRepositoryProtocol):
+    """Delegates to the crud.source_connection singleton."""
+
+    def __init__(self, source_registry: SourceRegistryProtocol) -> None:
+        """Initialize with source registry for enriching results."""
+        self._source_registry = source_registry
+
+    async def get(self, db: AsyncSession, id: UUID, ctx: ApiContext) -> Optional[SourceConnection]:
+        """Get a source connection by ID within org scope."""
+        return await crud.source_connection.get(db, id, ctx)
+
+    async def get_by_sync_id(
+        self, db: AsyncSession, sync_id: UUID, ctx: ApiContext
+    ) -> Optional[SourceConnection]:
+        """Get a source connection by sync ID within org scope."""
+        return await crud.source_connection.get_by_sync_id(db, sync_id=sync_id, ctx=ctx)
+
+    async def get_schedule_info(
+        self, db: AsyncSession, source_connection: SourceConnection
+    ) -> Optional[ScheduleInfo]:
+        """Get schedule info for a source connection."""
+        return await crud.source_connection.get_schedule_info(db, source_connection)
+
+    async def get_by_init_session(
+        self, db: AsyncSession, *, init_session_id: UUID, ctx: ApiContext
+    ) -> Optional[SourceConnection]:
+        """Get source connection by init session ID within org scope."""
+        return await crud.source_connection.get_by_query_and_org(
+            db, ctx=ctx, connection_init_session_id=init_session_id
+        )
+
+    async def get_init_session_with_redirect(
+        self, db: AsyncSession, session_id: UUID, ctx: ApiContext
+    ) -> Optional[ConnectionInitSession]:
+        """Get a ConnectionInitSession by ID with redirect_session eagerly loaded."""
+        stmt = (
+            select(ConnectionInitSession)
+            .where(ConnectionInitSession.id == session_id)
+            .where(ConnectionInitSession.organization_id == ctx.organization.id)
+            .options(selectinload(ConnectionInitSession.redirect_session))
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_multi_with_stats(
+        self,
+        db: AsyncSession,
+        *,
+        ctx: ApiContext,
+        collection_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[SourceConnectionStats]:
+        """Get source connections with complete stats."""
+        stat_rows = await crud.source_connection.get_multi_with_stats(
+            db, ctx=ctx, collection_id=collection_id, skip=skip, limit=limit
+        )
+        for row in stat_rows:
+            try:
+                entry = self._source_registry.get(row["short_name"])
+                row["federated_search"] = entry.federated_search
+            except KeyError:
+                row["federated_search"] = False
+        return [SourceConnectionStats.from_dict(row) for row in stat_rows]
+
+    async def get_sync_ids_for_collection(
+        self,
+        db: AsyncSession,
+        *,
+        organization_id: UUID,
+        readable_collection_id: str,
+    ) -> List[UUID]:
+        """Get all sync IDs for source connections in a collection."""
+        rows = await db.execute(
+            select(SourceConnection.sync_id)
+            .where(
+                SourceConnection.organization_id == organization_id,
+                SourceConnection.readable_collection_id == readable_collection_id,
+                SourceConnection.sync_id.is_not(None),
+            )
+            .distinct()
+        )
+        return [row[0] for row in rows if row[0]]
+
+    async def get_by_collection_ids(
+        self,
+        db: AsyncSession,
+        *,
+        organization_id: UUID,
+        readable_collection_ids: List[str],
+    ) -> List[SourceConnection]:
+        """Get all source connections for the given collection readable IDs."""
+        query = select(SourceConnection).where(
+            SourceConnection.organization_id == organization_id,
+            SourceConnection.readable_collection_id.in_(readable_collection_ids),
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    async def fetch_last_jobs(
+        self, db: AsyncSession, source_conns: List[SourceConnection]
+    ) -> Dict[UUID, Dict]:
+        """Fetch the most recent sync job for each connection."""
+        return await crud.source_connection._fetch_last_jobs(db, source_conns)
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: SourceConnection,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Update a source connection."""
+        return await crud.source_connection.update(
+            db, db_obj=db_obj, obj_in=obj_in, ctx=ctx, uow=uow
+        )
+
+    async def create(
+        self,
+        db: AsyncSession,
+        *,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Create a source connection."""
+        return await crud.source_connection.create(db, obj_in=obj_in, ctx=ctx, uow=uow)
+
+    async def remove(
+        self,
+        db: AsyncSession,
+        *,
+        id: UUID,
+        ctx: ApiContext,
+    ) -> Optional[SourceConnection]:
+        """Delete a source connection by ID."""
+        return await crud.source_connection.remove(db, id=id, ctx=ctx)
+
+    async def count_by_organization(self, db: AsyncSession, organization_id: UUID) -> int:
+        """Count source connections belonging to an organization."""
+        query = select(func.count(SourceConnection.id)).where(
+            SourceConnection.organization_id == organization_id
+        )
+        result = await db.execute(query)
+        return int(result.scalar_one() or 0)

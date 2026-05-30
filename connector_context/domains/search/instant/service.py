@@ -1,0 +1,129 @@
+"""Instant search service.
+
+Converts request directly into a SearchPlan (no LLM) and executes
+via the shared SearchPlanExecutor. Emits lifecycle events.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING
+
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context.api.context import ApiContext
+from connector_context.core.events.search import SearchCompletedEvent, SearchFailedEvent, SearchTier
+from connector_context.core.protocols.event_bus import EventBus
+from connector_context.domains.collections.protocols import CollectionRepositoryProtocol
+from connector_context.domains.search.protocols import (
+    InstantSearchServiceProtocol,
+    SearchPlanExecutorProtocol,
+)
+from connector_context.domains.search.types import SearchPlan, SearchQuery, SearchResults
+
+if TYPE_CHECKING:
+    from connector_context.schemas.search_v2 import InstantSearchRequest
+
+
+class InstantSearchService(InstantSearchServiceProtocol):
+    """Instant search — convert request to plan, execute against Vespa.
+
+    No LLM involved. The user's query becomes the plan directly.
+    """
+
+    def __init__(
+        self,
+        executor: SearchPlanExecutorProtocol,
+        collection_repo: CollectionRepositoryProtocol,
+        event_bus: EventBus,
+    ) -> None:
+        """Initialize with executor, collection repo, and event bus."""
+        self._executor = executor
+        self._collection_repo = collection_repo
+        self._event_bus = event_bus
+
+    async def search(
+        self,
+        db: AsyncSession,
+        ctx: ApiContext,
+        readable_id: str,
+        request: InstantSearchRequest,
+        user_principal_override: str | None = None,
+    ) -> SearchResults:
+        """Build plan from request and execute."""
+        start_time = time.monotonic()
+        ctx.logger.info(f"Instant search started collection={readable_id} query={request.query!r}")
+
+        try:
+            result = await self._execute(
+                db, ctx, readable_id, request, start_time, user_principal_override
+            )
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            ctx.logger.info(
+                f"Instant search completed collection={readable_id} "
+                f"results={len(result.results)} duration_ms={duration_ms}"
+            )
+            return result
+        except Exception as e:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            ctx.logger.error(
+                f"Instant search failed collection={readable_id} "
+                f"duration_ms={duration_ms} error={e}"
+            )
+            await self._event_bus.publish(
+                SearchFailedEvent(
+                    organization_id=ctx.organization.id,
+                    request_id=ctx.request_id,
+                    tier=SearchTier.INSTANT,
+                    plan=ctx.billing_plan,
+                    message=str(e),
+                    duration_ms=duration_ms,
+                )
+            )
+            raise
+
+    async def _execute(
+        self,
+        db: AsyncSession,
+        ctx: ApiContext,
+        readable_id: str,
+        request: InstantSearchRequest,
+        start_time: float,
+        user_principal_override: str | None = None,
+    ) -> SearchResults:
+        """Internal execution — resolve collection, build plan, execute."""
+        collection = await self._collection_repo.get_by_readable_id(db, readable_id, ctx)
+        if not collection:
+            raise HTTPException(status_code=404, detail=f"Collection '{readable_id}' not found")
+
+        plan = SearchPlan(
+            query=SearchQuery(primary=request.query),
+            limit=request.limit,
+            offset=request.offset,
+            retrieval_strategy=request.retrieval_strategy,
+        )
+
+        results = await self._executor.execute(
+            plan=plan,
+            user_filter=request.filter or [],
+            collection_id=str(collection.id),
+            db=db,
+            ctx=ctx,
+            collection_readable_id=readable_id,
+            user_principal=user_principal_override,
+        )
+
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        await self._event_bus.publish(
+            SearchCompletedEvent(
+                organization_id=ctx.organization.id,
+                request_id=ctx.request_id,
+                tier=SearchTier.INSTANT,
+                plan=ctx.billing_plan,
+                results=[r.model_dump(mode="json") for r in results.results],
+                duration_ms=duration_ms,
+            )
+        )
+
+        return results

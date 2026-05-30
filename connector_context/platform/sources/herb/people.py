@@ -1,0 +1,124 @@
+"""HERB People source — syncs employees and customers from the HERB benchmark dataset."""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import AsyncGenerator
+
+from connector_context.core.logging import ContextualLogger
+from connector_context.domains.browse_tree.types import NodeSelectionData
+from connector_context.domains.sources.token_providers.protocol import SourceAuthProvider
+from connector_context.domains.storage.file_service import FileService
+from connector_context.domains.syncs.cursors.cursor import SyncCursor
+from connector_context.platform.configs.auth import HerbAuthConfig
+from connector_context.platform.configs.config import HerbConfig
+from connector_context.platform.decorators import source
+from connector_context.platform.entities._base import BaseEntity, Breadcrumb
+from connector_context.platform.entities.herb_people import HerbCustomerEntity, HerbEmployeeEntity
+from connector_context.platform.http_client.connector_context_client import ConnectorContextHttpClient
+from connector_context.platform.sources._base import BaseSource
+from connector_context.schemas.source_connection import AuthenticationMethod
+
+
+@source(
+    name="HERB People",
+    short_name="herb_people",
+    auth_methods=[AuthenticationMethod.DIRECT],
+    auth_config_class=HerbAuthConfig,
+    config_class=HerbConfig,
+    labels=["Benchmark", "HERB"],
+    internal=True,
+)
+class HerbPeopleSource(BaseSource):
+    """Source that syncs employee and customer records from the HERB benchmark dataset."""
+
+    def __init__(
+        self,
+        *,
+        auth: SourceAuthProvider,
+        logger: ContextualLogger,
+        http_client: ConnectorContextHttpClient,
+    ) -> None:
+        """Initialize the HERB people source."""
+        super().__init__(auth=auth, logger=logger, http_client=http_client)
+        self.data_dir: str = ""
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        auth: SourceAuthProvider,
+        logger: ContextualLogger,
+        http_client: ConnectorContextHttpClient,
+        config: HerbConfig,
+    ) -> HerbPeopleSource:
+        """Create a new HERB people source instance."""
+        instance = cls(auth=auth, logger=logger, http_client=http_client)
+        if config:
+            instance.data_dir = config.data_dir if hasattr(config, "data_dir") else ""
+        return instance
+
+    async def generate_entities(
+        self,
+        *,
+        cursor: SyncCursor | None = None,
+        files: FileService | None = None,
+        node_selections: list[NodeSelectionData] | None = None,
+    ) -> AsyncGenerator[BaseEntity, None]:
+        """Generate employee and customer entities from HERB metadata files."""
+        metadata_dir = os.path.join(self.data_dir, "metadata")
+
+        # Employees
+        emp_path = os.path.join(metadata_dir, "employee.json")
+        if os.path.exists(emp_path):
+            with open(emp_path) as f:
+                employees = json.load(f)
+
+            for eid, emp in employees.items():
+                org = emp.get("org", "unknown")
+                yield HerbEmployeeEntity(
+                    employee_id=eid,
+                    name=emp.get("name", ""),
+                    role=emp.get("role", ""),
+                    location=emp.get("location", ""),
+                    org=org,
+                    breadcrumbs=[
+                        Breadcrumb(
+                            entity_id=org,
+                            name=org,
+                            entity_type="HerbOrg",
+                        ),
+                    ],
+                )
+
+        # Customers
+        cust_path = os.path.join(metadata_dir, "customers_data.json")
+        if os.path.exists(cust_path):
+            with open(cust_path) as f:
+                customers = json.load(f)
+
+            for cust in customers:
+                company = cust.get("company", "unknown")
+                yield HerbCustomerEntity(
+                    customer_id=cust["id"],
+                    name=cust.get("name", ""),
+                    role=cust.get("role", ""),
+                    company=company,
+                    breadcrumbs=[
+                        Breadcrumb(
+                            entity_id=company,
+                            name=company,
+                            entity_type="HerbCompany",
+                        ),
+                    ],
+                )
+
+    async def validate(self) -> None:
+        """Validate that the HERB metadata directory exists."""
+        metadata_dir = os.path.join(self.data_dir, "metadata")
+        if not (
+            os.path.isdir(metadata_dir)
+            and os.path.exists(os.path.join(metadata_dir, "employee.json"))
+        ):
+            raise ValueError(f"HERB metadata dir '{metadata_dir}' missing or no employee.json")

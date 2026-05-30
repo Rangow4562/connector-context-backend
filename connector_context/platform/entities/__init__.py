@@ -1,0 +1,749 @@
+"""All entity definitions, grouped by source."""
+
+from ._base import (  # noqa: F401
+    AccessControl,
+    BaseEntity,
+    Breadcrumb,
+    CodeFileEntity,
+    FileEntity,
+)
+from .airtable import (
+    AirtableAttachmentEntity,
+    AirtableBaseEntity,
+    AirtableCommentEntity,
+    AirtableRecordEntity,
+    AirtableTableEntity,
+    AirtableUserEntity,
+)
+from .apollo import (
+    ApolloAccountEntity,
+    ApolloContactEntity,
+    ApolloEmailActivityEntity,
+    ApolloSequenceEntity,
+)
+from .asana import (
+    AsanaCommentEntity,
+    AsanaFileEntity,
+    AsanaProjectEntity,
+    AsanaSectionEntity,
+    AsanaTaskEntity,
+    AsanaWorkspaceEntity,
+)
+from .attio import (
+    AttioListEntity,
+    AttioNoteEntity,
+    AttioObjectEntity,
+    AttioRecordEntity,
+)
+from .bitbucket import (
+    BitbucketCodeFileEntity,
+    BitbucketDirectoryEntity,
+    BitbucketRepositoryEntity,
+    BitbucketWorkspaceEntity,
+)
+from .box import (
+    BoxCollaborationEntity,
+    BoxCommentEntity,
+    BoxFileEntity,
+    BoxFolderEntity,
+    BoxUserEntity,
+)
+from .calcom import (
+    CalBookingDeletionEntity,
+    CalBookingEntity,
+    CalEventTypeEntity,
+    CalScheduleEntity,
+)
+from .clickup import (
+    ClickUpCommentEntity,
+    ClickUpFileEntity,
+    ClickUpFolderEntity,
+    ClickUpListEntity,
+    ClickUpSpaceEntity,
+    ClickUpSubtaskEntity,
+    ClickUpTaskEntity,
+    ClickUpWorkspaceEntity,
+)
+from .coda import (
+    CodaDocEntity,
+    CodaPageEntity,
+    CodaRowEntity,
+    CodaTableEntity,
+)
+from .confluence import (
+    ConfluenceBlogPostEntity,
+    ConfluenceCommentEntity,
+    ConfluenceCustomContentEntity,
+    ConfluenceDatabaseEntity,
+    ConfluenceFolderEntity,
+    ConfluenceLabelEntity,
+    ConfluencePageEntity,
+    ConfluenceSpaceEntity,
+    ConfluenceTaskEntity,
+    ConfluenceWhiteboardEntity,
+)
+from .ctti import CTTIWebEntity
+from .document360 import (
+    Document360ArticleEntity,
+    Document360CategoryEntity,
+    Document360ProjectVersionEntity,
+)
+from .dropbox import (
+    DropboxAccountEntity,
+    DropboxFileEntity,
+    DropboxFolderEntity,
+)
+from .enron import EnronEmailEntity
+from .file_stub import (
+    DocFileStubEntity,
+    DocxFileStubEntity,
+    FileStubContainerEntity,
+    PdfFileStubEntity,
+    PptxFileStubEntity,
+    ScannedPdfFileStubEntity,
+)
+from .fireflies import (
+    FirefliesTranscriptEntity,
+)
+from .freshdesk import (
+    FreshdeskCompanyEntity,
+    FreshdeskContactEntity,
+    FreshdeskConversationEntity,
+    FreshdeskSolutionArticleEntity,
+    FreshdeskTicketEntity,
+)
+from .github import (
+    GitHubCodeFileEntity,
+    GithubContentEntity,
+    GitHubDirectoryEntity,
+    GitHubFileDeletionEntity,
+    GitHubPRCommentEntity,
+    GitHubPullRequestEntity,
+    GithubRepoEntity,
+    GitHubRepositoryEntity,
+)
+from .gitlab import (
+    GitLabCodeFileEntity,
+    GitLabDirectoryEntity,
+    GitLabIssueEntity,
+    GitLabMergeRequestEntity,
+    GitLabProjectEntity,
+    GitLabUserEntity,
+)
+from .gmail import (
+    GmailAttachmentEntity,
+    GmailMessageDeletionEntity,
+    GmailMessageEntity,
+    GmailThreadEntity,
+)
+from .google_calendar import (
+    GoogleCalendarCalendarEntity,
+    GoogleCalendarEventEntity,
+    GoogleCalendarFreeBusyEntity,
+    GoogleCalendarListEntity,
+)
+from .google_docs import GoogleDocsDocumentEntity
+from .google_drive import (
+    GoogleDriveDriveEntity,
+    GoogleDriveFileDeletionEntity,
+    GoogleDriveFileEntity,
+)
+from .google_slides import (
+    GoogleSlidesPresentationEntity,
+    GoogleSlidesSlideEntity,
+)
+from .herb_code_review import HerbPullRequestEntity
+from .herb_documents import HerbDocumentEntity
+from .herb_meetings import HerbMeetingChatEntity, HerbMeetingTranscriptEntity
+from .herb_messaging import HerbMessageEntity
+from .herb_people import HerbCustomerEntity, HerbEmployeeEntity
+from .herb_resources import HerbResourceEntity
+from .hubspot import (
+    HubspotCompanyEntity,
+    HubspotContactEntity,
+    HubspotDealEntity,
+    HubspotTicketEntity,
+)
+from .intercom import (
+    IntercomConversationEntity,
+    IntercomConversationMessageEntity,
+    IntercomTicketEntity,
+)
+from .jira import (
+    JiraIssueEntity,
+    JiraProjectEntity,
+    ZephyrTestCaseEntity,
+    ZephyrTestCycleEntity,
+    ZephyrTestPlanEntity,
+)
+from .linear import (
+    LinearAttachmentEntity,
+    LinearCommentEntity,
+    LinearIssueEntity,
+    LinearProjectEntity,
+    LinearTeamEntity,
+    LinearUserEntity,
+)
+from .monday import (
+    MondayBoardEntity,
+    MondayColumnEntity,
+    MondayGroupEntity,
+    MondayItemEntity,
+    MondaySubitemEntity,
+    MondayUpdateEntity,
+)
+from .notion import (
+    NotionDatabaseEntity,
+    NotionFileEntity,
+    NotionPageEntity,
+    NotionPropertyEntity,
+)
+from .onedrive import (
+    OneDriveDriveEntity,
+    OneDriveDriveItemEntity,
+)
+from .onenote import (
+    OneNoteNotebookEntity,
+    OneNotePageFileEntity,
+    OneNoteSectionEntity,
+    OneNoteSectionGroupEntity,
+)
+from .outlook_calendar import (
+    OutlookCalendarAttachmentEntity,
+    OutlookCalendarCalendarEntity,
+    OutlookCalendarEventEntity,
+)
+from .outlook_mail import (
+    OutlookAttachmentEntity,
+    OutlookMailFolderDeletionEntity,
+    OutlookMailFolderEntity,
+    OutlookMessageDeletionEntity,
+    OutlookMessageEntity,
+)
+from .pipedrive import (
+    PipedriveActivityEntity,
+    PipedriveDealEntity,
+    PipedriveLeadEntity,
+    PipedriveNoteEntity,
+    PipedriveOrganizationEntity,
+    PipedrivePersonEntity,
+    PipedriveProductEntity,
+)
+from .powerpoint import PowerPointPresentationEntity
+from .salesforce import (
+    SalesforceAccountEntity,
+    SalesforceContactEntity,
+    SalesforceOpportunityEntity,
+)
+from .servicenow import (
+    ServiceNowCatalogItemEntity,
+    ServiceNowChangeRequestEntity,
+    ServiceNowIncidentEntity,
+    ServiceNowKnowledgeArticleEntity,
+    ServiceNowProblemEntity,
+)
+from .sharepoint import (
+    SharePointDriveEntity,
+    SharePointDriveItemEntity,
+    SharePointGroupEntity,
+    SharePointListEntity,
+    SharePointListItemEntity,
+    SharePointPageEntity,
+    SharePointSiteEntity,
+    SharePointUserEntity,
+)
+from .sharepoint2019v2 import (
+    SharePoint2019V2FileEntity,
+    SharePoint2019V2ItemEntity,
+    SharePoint2019V2ListEntity,
+    SharePoint2019V2SiteEntity,
+)
+from .sharepoint_online import (
+    SharePointOnlineDriveEntity,
+    SharePointOnlineFileEntity,
+    SharePointOnlineItemEntity,
+    SharePointOnlinePageEntity,
+    SharePointOnlineSiteEntity,
+)
+from .shopify import (
+    ShopifyCollectionEntity,
+    ShopifyCustomerEntity,
+    ShopifyDiscountEntity,
+    ShopifyDraftOrderEntity,
+    ShopifyFileEntity,
+    ShopifyFulfillmentEntity,
+    ShopifyGiftCardEntity,
+    ShopifyInventoryItemEntity,
+    ShopifyInventoryLevelEntity,
+    ShopifyLocationEntity,
+    ShopifyMetaobjectEntity,
+    ShopifyOrderEntity,
+    ShopifyProductEntity,
+    ShopifyProductVariantEntity,
+    ShopifyThemeEntity,
+)
+from .slab import (
+    SlabCommentEntity,
+    SlabPostEntity,
+    SlabTopicEntity,
+)
+from .slack import SlackMessageEntity
+from .slite import SliteNoteEntity
+from .stripe import (
+    StripeBalanceEntity,
+    StripeBalanceTransactionEntity,
+    StripeChargeEntity,
+    StripeCustomerEntity,
+    StripeEventEntity,
+    StripeInvoiceEntity,
+    StripePaymentIntentEntity,
+    StripePaymentMethodEntity,
+    StripePayoutEntity,
+    StripeRefundEntity,
+    StripeSubscriptionEntity,
+)
+from .stub import (
+    CodeStubFileEntity,
+    LargeStubEntity,
+    LargeStubFileEntity,
+    MediumStubEntity,
+    PdfStubFileEntity,
+    PptxStubFileEntity,
+    SmallStubEntity,
+    SmallStubFileEntity,
+    StubContainerEntity,
+)
+from .teams import (
+    TeamsChannelEntity,
+    TeamsChatEntity,
+    TeamsMessageEntity,
+    TeamsTeamEntity,
+    TeamsUserEntity,
+)
+from .timed import TimedContainerEntity, TimedEntity
+from .todoist import (
+    TodoistCommentEntity,
+    TodoistProjectEntity,
+    TodoistSectionEntity,
+    TodoistTaskEntity,
+)
+from .trello import (
+    TrelloBoardEntity,
+    TrelloCardEntity,
+    TrelloChecklistEntity,
+    TrelloListEntity,
+    TrelloMemberEntity,
+)
+from .web import WebFileEntity
+from .word import WordDocumentEntity
+from .zendesk import (
+    ZendeskAttachmentEntity,
+    ZendeskCommentEntity,
+    ZendeskOrganizationEntity,
+    ZendeskTicketEntity,
+    ZendeskUserEntity,
+)
+from .zoho_crm import (
+    ZohoCRMAccountEntity,
+    ZohoCRMContactEntity,
+    ZohoCRMDealEntity,
+    ZohoCRMInvoiceEntity,
+    ZohoCRMLeadEntity,
+    ZohoCRMProductEntity,
+    ZohoCRMQuoteEntity,
+    ZohoCRMSalesOrderEntity,
+)
+from .zoom import (
+    ZoomMeetingEntity,
+    ZoomMeetingParticipantEntity,
+    ZoomRecordingEntity,
+    ZoomTranscriptEntity,
+)
+
+ENTITIES_BY_SOURCE: dict[str, list[type]] = {
+    "apollo": [
+        ApolloAccountEntity,
+        ApolloContactEntity,
+        ApolloEmailActivityEntity,
+        ApolloSequenceEntity,
+    ],
+    "airtable": [
+        AirtableAttachmentEntity,
+        AirtableBaseEntity,
+        AirtableCommentEntity,
+        AirtableRecordEntity,
+        AirtableTableEntity,
+        AirtableUserEntity,
+    ],
+    "asana": [
+        AsanaCommentEntity,
+        AsanaFileEntity,
+        AsanaProjectEntity,
+        AsanaSectionEntity,
+        AsanaTaskEntity,
+        AsanaWorkspaceEntity,
+    ],
+    "attio": [
+        AttioListEntity,
+        AttioNoteEntity,
+        AttioObjectEntity,
+        AttioRecordEntity,
+    ],
+    "bitbucket": [
+        BitbucketCodeFileEntity,
+        BitbucketDirectoryEntity,
+        BitbucketRepositoryEntity,
+        BitbucketWorkspaceEntity,
+    ],
+    "box": [
+        BoxCollaborationEntity,
+        BoxCommentEntity,
+        BoxFileEntity,
+        BoxFolderEntity,
+        BoxUserEntity,
+    ],
+    "clickup": [
+        ClickUpCommentEntity,
+        ClickUpFileEntity,
+        ClickUpFolderEntity,
+        ClickUpListEntity,
+        ClickUpSpaceEntity,
+        ClickUpSubtaskEntity,
+        ClickUpTaskEntity,
+        ClickUpWorkspaceEntity,
+    ],
+    "coda": [
+        CodaDocEntity,
+        CodaPageEntity,
+        CodaRowEntity,
+        CodaTableEntity,
+    ],
+    "confluence": [
+        ConfluenceBlogPostEntity,
+        ConfluenceCommentEntity,
+        ConfluenceCustomContentEntity,
+        ConfluenceDatabaseEntity,
+        ConfluenceFolderEntity,
+        ConfluenceLabelEntity,
+        ConfluencePageEntity,
+        ConfluenceSpaceEntity,
+        ConfluenceTaskEntity,
+        ConfluenceWhiteboardEntity,
+    ],
+    "ctti": [
+        CTTIWebEntity,
+    ],
+    "document360": [
+        Document360ArticleEntity,
+        Document360CategoryEntity,
+        Document360ProjectVersionEntity,
+    ],
+    "dropbox": [
+        DropboxAccountEntity,
+        DropboxFileEntity,
+        DropboxFolderEntity,
+    ],
+    "enron": [
+        EnronEmailEntity,
+    ],
+    "file_stub": [
+        DocFileStubEntity,
+        DocxFileStubEntity,
+        FileStubContainerEntity,
+        PdfFileStubEntity,
+        PptxFileStubEntity,
+        ScannedPdfFileStubEntity,
+    ],
+    "fireflies": [
+        FirefliesTranscriptEntity,
+    ],
+    "freshdesk": [
+        FreshdeskCompanyEntity,
+        FreshdeskContactEntity,
+        FreshdeskConversationEntity,
+        FreshdeskSolutionArticleEntity,
+        FreshdeskTicketEntity,
+    ],
+    "github": [
+        GitHubCodeFileEntity,
+        GithubContentEntity,
+        GitHubDirectoryEntity,
+        GitHubFileDeletionEntity,
+        GitHubPRCommentEntity,
+        GitHubPullRequestEntity,
+        GithubRepoEntity,
+        GitHubRepositoryEntity,
+    ],
+    "gitlab": [
+        GitLabCodeFileEntity,
+        GitLabDirectoryEntity,
+        GitLabIssueEntity,
+        GitLabMergeRequestEntity,
+        GitLabProjectEntity,
+        GitLabUserEntity,
+    ],
+    "gmail": [
+        GmailAttachmentEntity,
+        GmailMessageDeletionEntity,
+        GmailMessageEntity,
+        GmailThreadEntity,
+    ],
+    "herb_code_review": [
+        HerbPullRequestEntity,
+    ],
+    "herb_documents": [
+        HerbDocumentEntity,
+    ],
+    "herb_meetings": [
+        HerbMeetingTranscriptEntity,
+        HerbMeetingChatEntity,
+    ],
+    "herb_messaging": [
+        HerbMessageEntity,
+    ],
+    "herb_people": [
+        HerbEmployeeEntity,
+        HerbCustomerEntity,
+    ],
+    "herb_resources": [
+        HerbResourceEntity,
+    ],
+    "google_calendar": [
+        GoogleCalendarCalendarEntity,
+        GoogleCalendarEventEntity,
+        GoogleCalendarFreeBusyEntity,
+        GoogleCalendarListEntity,
+    ],
+    "google_docs": [
+        GoogleDocsDocumentEntity,
+    ],
+    "google_drive": [
+        GoogleDriveDriveEntity,
+        GoogleDriveFileDeletionEntity,
+        GoogleDriveFileEntity,
+    ],
+    "google_slides": [
+        GoogleSlidesPresentationEntity,
+        GoogleSlidesSlideEntity,
+    ],
+    "hubspot": [
+        HubspotCompanyEntity,
+        HubspotContactEntity,
+        HubspotDealEntity,
+        HubspotTicketEntity,
+    ],
+    "intercom": [
+        IntercomConversationEntity,
+        IntercomConversationMessageEntity,
+        IntercomTicketEntity,
+    ],
+    "jira": [
+        JiraIssueEntity,
+        JiraProjectEntity,
+        ZephyrTestCaseEntity,
+        ZephyrTestCycleEntity,
+        ZephyrTestPlanEntity,
+    ],
+    "linear": [
+        LinearAttachmentEntity,
+        LinearCommentEntity,
+        LinearIssueEntity,
+        LinearProjectEntity,
+        LinearTeamEntity,
+        LinearUserEntity,
+    ],
+    "monday": [
+        MondayBoardEntity,
+        MondayColumnEntity,
+        MondayGroupEntity,
+        MondayItemEntity,
+        MondaySubitemEntity,
+        MondayUpdateEntity,
+    ],
+    "notion": [
+        NotionDatabaseEntity,
+        NotionFileEntity,
+        NotionPageEntity,
+        NotionPropertyEntity,
+    ],
+    "onedrive": [
+        OneDriveDriveEntity,
+        OneDriveDriveItemEntity,
+    ],
+    "onenote": [
+        OneNoteNotebookEntity,
+        OneNotePageFileEntity,
+        OneNoteSectionEntity,
+        OneNoteSectionGroupEntity,
+    ],
+    "outlook_calendar": [
+        OutlookCalendarAttachmentEntity,
+        OutlookCalendarCalendarEntity,
+        OutlookCalendarEventEntity,
+    ],
+    "outlook_mail": [
+        OutlookAttachmentEntity,
+        OutlookMailFolderDeletionEntity,
+        OutlookMailFolderEntity,
+        OutlookMessageDeletionEntity,
+        OutlookMessageEntity,
+    ],
+    "pipedrive": [
+        PipedriveActivityEntity,
+        PipedriveDealEntity,
+        PipedriveLeadEntity,
+        PipedriveNoteEntity,
+        PipedriveOrganizationEntity,
+        PipedrivePersonEntity,
+        PipedriveProductEntity,
+    ],
+    "salesforce": [
+        SalesforceAccountEntity,
+        SalesforceContactEntity,
+        SalesforceOpportunityEntity,
+    ],
+    "sharepoint": [
+        SharePointDriveEntity,
+        SharePointDriveItemEntity,
+        SharePointGroupEntity,
+        SharePointListEntity,
+        SharePointListItemEntity,
+        SharePointPageEntity,
+        SharePointSiteEntity,
+        SharePointUserEntity,
+    ],
+    "sharepoint2019v2": [
+        SharePoint2019V2FileEntity,
+        SharePoint2019V2ItemEntity,
+        SharePoint2019V2ListEntity,
+        SharePoint2019V2SiteEntity,
+    ],
+    "sharepoint_online": [
+        SharePointOnlineSiteEntity,
+        SharePointOnlineDriveEntity,
+        SharePointOnlineItemEntity,
+        SharePointOnlineFileEntity,
+        SharePointOnlinePageEntity,
+    ],
+    "slite": [
+        SliteNoteEntity,
+    ],
+    "shopify": [
+        ShopifyCollectionEntity,
+        ShopifyCustomerEntity,
+        ShopifyDiscountEntity,
+        ShopifyDraftOrderEntity,
+        ShopifyFileEntity,
+        ShopifyFulfillmentEntity,
+        ShopifyGiftCardEntity,
+        ShopifyInventoryItemEntity,
+        ShopifyInventoryLevelEntity,
+        ShopifyLocationEntity,
+        ShopifyMetaobjectEntity,
+        ShopifyOrderEntity,
+        ShopifyProductEntity,
+        ShopifyProductVariantEntity,
+        ShopifyThemeEntity,
+    ],
+    "slab": [
+        SlabCommentEntity,
+        SlabPostEntity,
+        SlabTopicEntity,
+    ],
+    "slack": [
+        SlackMessageEntity,
+    ],
+    "stripe": [
+        StripeBalanceEntity,
+        StripeBalanceTransactionEntity,
+        StripeChargeEntity,
+        StripeCustomerEntity,
+        StripeEventEntity,
+        StripeInvoiceEntity,
+        StripePaymentIntentEntity,
+        StripePaymentMethodEntity,
+        StripePayoutEntity,
+        StripeRefundEntity,
+        StripeSubscriptionEntity,
+    ],
+    "stub": [
+        CodeStubFileEntity,
+        LargeStubEntity,
+        LargeStubFileEntity,
+        MediumStubEntity,
+        PdfStubFileEntity,
+        PptxStubFileEntity,
+        SmallStubEntity,
+        SmallStubFileEntity,
+        StubContainerEntity,
+    ],
+    "teams": [
+        TeamsChannelEntity,
+        TeamsChatEntity,
+        TeamsMessageEntity,
+        TeamsTeamEntity,
+        TeamsUserEntity,
+    ],
+    "timed": [
+        TimedContainerEntity,
+        TimedEntity,
+    ],
+    "todoist": [
+        TodoistCommentEntity,
+        TodoistProjectEntity,
+        TodoistSectionEntity,
+        TodoistTaskEntity,
+    ],
+    "trello": [
+        TrelloBoardEntity,
+        TrelloCardEntity,
+        TrelloChecklistEntity,
+        TrelloListEntity,
+        TrelloMemberEntity,
+    ],
+    "web": [
+        WebFileEntity,
+    ],
+    "word": [
+        WordDocumentEntity,
+    ],
+    "servicenow": [
+        ServiceNowCatalogItemEntity,
+        ServiceNowChangeRequestEntity,
+        ServiceNowIncidentEntity,
+        ServiceNowKnowledgeArticleEntity,
+        ServiceNowProblemEntity,
+    ],
+    "powerpoint": [
+        PowerPointPresentationEntity,
+    ],
+    "zoom": [
+        ZoomMeetingEntity,
+        ZoomMeetingParticipantEntity,
+        ZoomRecordingEntity,
+        ZoomTranscriptEntity,
+    ],
+    "zendesk": [
+        ZendeskAttachmentEntity,
+        ZendeskCommentEntity,
+        ZendeskOrganizationEntity,
+        ZendeskTicketEntity,
+        ZendeskUserEntity,
+    ],
+    "zoho_crm": [
+        ZohoCRMAccountEntity,
+        ZohoCRMContactEntity,
+        ZohoCRMDealEntity,
+        ZohoCRMInvoiceEntity,
+        ZohoCRMLeadEntity,
+        ZohoCRMProductEntity,
+        ZohoCRMQuoteEntity,
+        ZohoCRMSalesOrderEntity,
+    ],
+    "calcom": [
+        CalBookingEntity,
+        CalBookingDeletionEntity,
+        CalEventTypeEntity,
+        CalScheduleEntity,
+    ],
+}

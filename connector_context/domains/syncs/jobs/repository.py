@@ -1,0 +1,87 @@
+"""Sync job repository wrapping crud.sync_job."""
+
+from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context import crud
+from connector_context.api.context import ApiContext
+from connector_context.core.context import BaseContext
+from connector_context.core.shared_models import SyncJobStatus
+from connector_context.db.unit_of_work import UnitOfWork
+from connector_context.domains.syncs.jobs.protocols import SyncJobRepositoryProtocol
+from connector_context.models.sync_job import SyncJob
+from connector_context.schemas.sync_job import SyncJobCreate, SyncJobUpdate
+
+
+class SyncJobRepository(SyncJobRepositoryProtocol):
+    """Delegates to the crud.sync_job singleton."""
+
+    async def get(self, db: AsyncSession, id: UUID, ctx: ApiContext) -> Optional[SyncJob]:
+        """Get a sync job by ID within org scope."""
+        return await crud.sync_job.get(db, id=id, ctx=ctx)
+
+    async def get_latest_by_sync_id(self, db: AsyncSession, sync_id: UUID) -> Optional[SyncJob]:
+        """Get the most recent sync job for a sync."""
+        return await crud.sync_job.get_latest_by_sync_id(db, sync_id=sync_id)
+
+    async def get_active_for_sync(
+        self, db: AsyncSession, sync_id: UUID, ctx: ApiContext
+    ) -> List[SyncJob]:
+        """Get all active (pending, running, cancelling) jobs for a sync."""
+        return await crud.sync_job.get_all_by_sync_id(
+            db,
+            sync_id=sync_id,
+            status=[
+                SyncJobStatus.PENDING.value,
+                SyncJobStatus.RUNNING.value,
+                SyncJobStatus.CANCELLING.value,
+            ],
+        )
+
+    async def get_all_by_sync_id(
+        self,
+        db: AsyncSession,
+        sync_id: UUID,
+        ctx: BaseContext,
+        limit: Optional[int] = None,
+    ) -> List[SyncJob]:
+        """Get all jobs for a specific sync."""
+        return await crud.sync_job.get_all_by_sync_id(db, sync_id=sync_id, limit=limit)
+
+    async def create(
+        self,
+        db: AsyncSession,
+        obj_in: SyncJobCreate,
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SyncJob:
+        """Create a new sync job."""
+        return await crud.sync_job.create(db, obj_in=obj_in, ctx=ctx, uow=uow)
+
+    async def update(
+        self,
+        db: AsyncSession,
+        db_obj: SyncJob,
+        obj_in: SyncJobUpdate,
+        ctx: ApiContext,
+    ) -> SyncJob:
+        """Update an existing sync job."""
+        return await crud.sync_job.update(db=db, db_obj=db_obj, obj_in=obj_in, ctx=ctx)
+
+    async def get_stuck_jobs_by_status(
+        self,
+        db: AsyncSession,
+        status: List[str],
+        modified_before: Optional[datetime] = None,
+        started_before: Optional[datetime] = None,
+    ) -> List[SyncJob]:
+        """Get sync jobs stuck in specific statuses based on timestamps."""
+        return await crud.sync_job.get_stuck_jobs_by_status(
+            db=db,
+            status=status,
+            modified_before=modified_before,
+            started_before=started_before,
+        )

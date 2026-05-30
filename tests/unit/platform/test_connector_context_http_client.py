@@ -1,0 +1,348 @@
+"""Tests for ConnectorContextHttpClient wrapper.
+
+Tests the HTTP client wrapper that adds rate limiting to source API calls.
+"""
+
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import httpx
+import pytest
+
+from connector_context.core.logging import logger
+from connector_context.domains.sources.rate_limiting.exceptions import InternalRateLimitExceeded
+from connector_context.platform.http_client.connector_context_client import ConnectorContextHttpClient
+from connector_context.platform.utils.ssrf import SSRFViolation
+
+
+@pytest.fixture(autouse=True)
+def _pin_ssrf_private_networks(monkeypatch):
+    monkeypatch.setattr(
+        "connector_context.platform.utils.ssrf._get_allow_private_default",
+        lambda: False,
+    )
+
+
+@pytest.fixture
+def org_id():
+    """Create a test organization ID."""
+    return uuid4()
+
+
+@pytest.fixture
+def connection_id():
+    """Create a test source connection ID."""
+    return uuid4()
+
+
+@pytest.fixture
+def mock_httpx_client():
+    """Create a mock httpx.AsyncClient."""
+    mock = MagicMock()
+    mock.request = AsyncMock(return_value=MagicMock(status_code=200))
+    mock.__aenter__ = AsyncMock(return_value=mock)
+    mock.__aexit__ = AsyncMock()
+    mock.is_closed = False
+    mock.aclose = AsyncMock()
+    return mock
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_allows_request_under_limit(org_id, mock_httpx_client):
+    """Test that requests under limit are allowed and delegated to wrapped client."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()  # No exception
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="google_drive",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    response = await client.request("GET", "https://api.example.com/data")
+
+    # Verify rate limiter was called
+    mock_rate_limiter.check_and_increment.assert_called_once_with(
+        org_id=org_id,
+        source_short_name="google_drive",
+        source_connection_id=None,
+    )
+
+    # Verify wrapped client was called
+    mock_httpx_client.request.assert_called_once_with(
+        "GET", "https://api.example.com/data"
+    )
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_converts_exception_to_429(org_id, mock_httpx_client):
+    """Test that InternalRateLimitExceeded is converted to HTTP 429."""
+    mock_rate_limiter = AsyncMock()
+    # Simulate rate limit exceeded
+    mock_rate_limiter.check_and_increment = AsyncMock(
+        side_effect=InternalRateLimitExceeded(
+            retry_after=30.0, source_short_name="google_drive"
+        )
+    )
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="google_drive",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    # Should raise httpx.HTTPStatusError with 429 status
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await client.request("GET", "https://api.example.com/data")
+
+    # Verify it's a 429 error
+    assert exc_info.value.response.status_code == 429
+    assert "Retry-After" in exc_info.value.response.headers
+    assert exc_info.value.response.headers["Retry-After"] == "30"
+
+    # Verify wrapped client was NOT called
+    mock_httpx_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_delegates_http_methods(org_id, mock_httpx_client):
+    """Test that all HTTP methods are delegated to wrapped client."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="google_drive",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    # Test all HTTP methods
+    await client.get("https://api.example.com/data")
+    await client.post("https://api.example.com/data", json={"key": "value"})
+    await client.put("https://api.example.com/data")
+    await client.delete("https://api.example.com/data")
+    await client.patch("https://api.example.com/data")
+    await client.head("https://api.example.com/data")
+    await client.options("https://api.example.com/data")
+
+    # Verify all methods were delegated
+    assert mock_httpx_client.request.call_count == 7
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_context_manager(org_id, mock_httpx_client):
+    """Test that context manager is properly delegated."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="google_drive",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    async with client as c:
+        await c.get("https://api.example.com/data")
+
+    # Verify context manager methods were called
+    mock_httpx_client.__aenter__.assert_called_once()
+    mock_httpx_client.__aexit__.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_connection_level_limiting(org_id, connection_id, mock_httpx_client):
+    """Test connection-level rate limiting (e.g., Notion per-user)."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="notion",
+        rate_limiter=mock_rate_limiter,
+        source_connection_id=connection_id,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    await client.get("https://api.notion.com/v1/users/me")
+
+    # Verify rate limiter was called with connection ID
+    # Limiter reads rate_limit_level from Source table internally
+    mock_rate_limiter.check_and_increment.assert_called_once_with(
+        org_id=org_id,
+        source_short_name="notion",
+        source_connection_id=connection_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_connector_context_client_skips_check_when_feature_disabled(org_id, mock_httpx_client):
+    """Test that rate limit check is skipped when feature flag is disabled."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="google_drive",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=False,  # Feature disabled
+        logger=logger,
+    )
+
+    await client.get("https://api.example.com/data")
+
+    # Verify rate limiter was NOT called
+    mock_rate_limiter.check_and_increment.assert_not_called()
+
+    # Verify wrapped client WAS called
+    mock_httpx_client.request.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# SSRF protection tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ssrf_blocks_loopback_in_request(org_id, mock_httpx_client):
+    """Test that request() blocks loopback addresses."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="test_source",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    with pytest.raises(SSRFViolation):
+        await client.request("GET", "http://127.0.0.1/admin")
+
+    # Wrapped client should NOT have been called
+    mock_httpx_client.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ssrf_blocks_metadata_in_request(org_id, mock_httpx_client):
+    """Test that request() blocks cloud metadata endpoints."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="test_source",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    with pytest.raises(SSRFViolation, match="blocked metadata"):
+        await client.request("GET", "http://169.254.169.254/latest/meta-data/")
+
+
+@pytest.mark.asyncio
+async def test_ssrf_allows_public_url(org_id, mock_httpx_client):
+    """Test that public URLs pass SSRF check."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="test_source",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    await client.request("GET", "https://api.github.com/repos")
+    mock_httpx_client.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ssrf_blocks_loopback_in_stream(org_id, mock_httpx_client):
+    """Test that stream() blocks loopback addresses."""
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.check_and_increment = AsyncMock()
+
+    client = ConnectorContextHttpClient(
+        wrapped_client=mock_httpx_client,
+        org_id=org_id,
+        source_short_name="test_source",
+        rate_limiter=mock_rate_limiter,
+        feature_flag_enabled=True,
+        logger=logger,
+    )
+
+    with pytest.raises(SSRFViolation):
+        async with client.stream("GET", "http://127.0.0.1/secret"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_ssrf_event_hook_catches_redirect_to_private():
+    """Test that the event hook catches redirects targeting private IPs."""
+    # Use a real httpx.AsyncClient to test the event hook installation
+    real_client = httpx.AsyncClient()
+    try:
+        org_id = uuid4()
+        ConnectorContextHttpClient(
+            wrapped_client=real_client,
+            org_id=org_id,
+            source_short_name="test_source",
+            feature_flag_enabled=True,
+            logger=logger,
+        )
+
+        # Verify the hook was installed
+        assert len(real_client.event_hooks.get("request", [])) >= 1
+
+        # Simulate the hook firing on a redirect target
+        private_request = httpx.Request("GET", "http://192.168.1.1/internal")
+        hook = real_client.event_hooks["request"][-1]
+
+        with pytest.raises(SSRFViolation):
+            await hook(private_request)
+    finally:
+        await real_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ssrf_event_hook_allows_public_redirect():
+    """Test that the event hook allows redirects to public URLs."""
+    real_client = httpx.AsyncClient()
+    try:
+        org_id = uuid4()
+        ConnectorContextHttpClient(
+            wrapped_client=real_client,
+            org_id=org_id,
+            source_short_name="test_source",
+            feature_flag_enabled=True,
+            logger=logger,
+        )
+
+        public_request = httpx.Request("GET", "https://cdn.example.com/resource")
+        hook = real_client.event_hooks["request"][-1]
+
+        # Should not raise
+        await hook(public_request)
+    finally:
+        await real_client.aclose()

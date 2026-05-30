@@ -1,0 +1,476 @@
+"""Jira entity schemas.
+
+Entity schemas for Jira Projects, Issues, and Zephyr Scale test management entities.
+
+Zephyr Scale is a test management plugin for Jira that creates separate entities
+(Test Cases, Test Cycles, Test Plans) accessible via the Zephyr Scale API.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import computed_field
+
+from connector_context.platform.entities._connector_context_field import ConnectorContextField
+from connector_context.platform.entities._base import BaseEntity, Breadcrumb
+
+
+def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse Jira/Zephyr timestamp strings into aware datetimes."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _extract_text_from_adf(adf_data: Any) -> str:
+    """Extract plain text from Atlassian Document Format (ADF)."""
+    text_parts: List[str] = []
+
+    def extract_recursive(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "text":
+                text_parts.append(node.get("text", ""))
+            elif node.get("type") == "emoji" and "text" in node.get("attrs", {}):
+                text_parts.append(node.get("attrs", {}).get("text", ""))
+            if "content" in node and isinstance(node["content"], list):
+                for child in node["content"]:
+                    extract_recursive(child)
+        elif isinstance(node, list):
+            for item in node:
+                extract_recursive(item)
+
+    extract_recursive(adf_data)
+    return " ".join(text_parts)
+
+
+class JiraProjectEntity(BaseEntity):
+    """Schema for a Jira Project.
+
+    Reference:
+        https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/
+    """
+
+    project_id: str = ConnectorContextField(
+        ..., description="Unique numeric identifier for the project.", is_entity_id=True
+    )
+    project_name: str = ConnectorContextField(
+        ..., description="Display name of the project.", embeddable=True, is_name=True
+    )
+    project_key: str = ConnectorContextField(
+        ..., description="Unique key of the project (e.g., 'PROJ').", embeddable=True
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Description of the project.", embeddable=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None, description="Link to the project in Jira.", embeddable=False, unhashable=True
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """UI link for the Jira project."""
+        return self.web_url_value or ""
+
+
+class JiraIssueEntity(BaseEntity):
+    """Schema for a Jira Issue.
+
+    Reference:
+        https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/
+    """
+
+    issue_id: str = ConnectorContextField(
+        ..., description="Unique identifier for the issue.", is_entity_id=True
+    )
+    issue_key: str = ConnectorContextField(
+        ..., description="Jira key for the issue (e.g. 'PROJ-123').", embeddable=True
+    )
+    summary: str = ConnectorContextField(
+        ..., description="Short summary field of the issue.", embeddable=True, is_name=True
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Detailed description of the issue.", embeddable=True
+    )
+    status: Optional[str] = ConnectorContextField(
+        None, description="Current workflow status of the issue.", embeddable=True
+    )
+    issue_type: Optional[str] = ConnectorContextField(
+        None, description="Type of the issue (bug, task, story, etc.).", embeddable=True
+    )
+    project_key: str = ConnectorContextField(
+        ..., description="Key of the project that owns this issue.", embeddable=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the issue was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the issue was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None, description="Link to the issue in Jira.", embeddable=False, unhashable=True
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """UI link for the Jira issue."""
+        return self.web_url_value or ""
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        project_breadcrumb: Breadcrumb,
+        project_key: str,
+        site_url: str | None = None,
+    ) -> JiraIssueEntity:
+        """Build a JiraIssueEntity from the raw Jira API response dict."""
+        fields = data.get("fields", {})
+        issue_key = data.get("key", "unknown")
+
+        issue_type_obj = fields.get("issuetype") or {}
+        issue_type_name = issue_type_obj.get("name") if issue_type_obj else None
+
+        status_obj = fields.get("status") or {}
+        status_name = status_obj.get("name") if status_obj else None
+
+        description = fields.get("description")
+        description_text = None
+        if description:
+            if isinstance(description, dict):
+                description_text = _extract_text_from_adf(description)
+            else:
+                description_text = description
+
+        issue_id = str(data["id"])
+        summary = fields.get("summary") or issue_key
+        created_time = _parse_datetime(fields.get("created")) or datetime.utcnow()
+        updated_time = _parse_datetime(fields.get("updated")) or created_time
+        web_url_value = f"{site_url}/browse/{issue_key}" if site_url else None
+
+        return cls(
+            entity_id=issue_id,
+            breadcrumbs=[project_breadcrumb],
+            name=summary,
+            created_at=created_time,
+            updated_at=updated_time,
+            issue_id=issue_id,
+            issue_key=issue_key,
+            summary=summary,
+            description=description_text,
+            status=status_name,
+            issue_type=issue_type_name,
+            project_key=project_key,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+        )
+
+
+# =============================================================================
+# Zephyr Scale Entities
+# =============================================================================
+# These entities are from the Zephyr Scale test management plugin for Jira.
+# They are accessed via the Zephyr Scale API (https://api.zephyrscale.smartbear.com/v2),
+# not the Jira REST API, and require a separate Zephyr Scale API token.
+
+
+class ZephyrTestCaseEntity(BaseEntity):
+    """Schema for a Zephyr Scale Test Case.
+
+    Test cases have keys in the format PROJECT-T### (e.g., PROJ-T1, PROJ-T2).
+
+    Reference:
+        https://support.smartbear.com/zephyr-scale-cloud/api-docs/#tag/Test-Cases
+    """
+
+    test_case_id: str = ConnectorContextField(
+        ..., description="Unique internal identifier for the test case.", is_entity_id=True
+    )
+    test_case_key: str = ConnectorContextField(
+        ...,
+        description="Zephyr Scale key for the test case (e.g., 'PROJ-T1').",
+        embeddable=True,
+    )
+    name: str = ConnectorContextField(
+        ..., description="Name/title of the test case.", embeddable=True, is_name=True
+    )
+    objective: Optional[str] = ConnectorContextField(
+        None, description="Objective or purpose of the test case.", embeddable=True
+    )
+    precondition: Optional[str] = ConnectorContextField(
+        None, description="Preconditions required before executing the test.", embeddable=True
+    )
+    status_name: Optional[str] = ConnectorContextField(
+        None,
+        description="Current status of the test case (e.g., Draft, Approved).",
+        embeddable=True,
+    )
+    priority_name: Optional[str] = ConnectorContextField(
+        None, description="Priority level of the test case.", embeddable=True
+    )
+    folder_path: Optional[str] = ConnectorContextField(
+        None, description="Folder path where the test case is organized.", embeddable=True
+    )
+    project_key: str = ConnectorContextField(
+        ..., description="Key of the Jira project this test case belongs to.", embeddable=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test case was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test case was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="Link to the test case in Zephyr Scale.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """UI link for the Zephyr Scale test case."""
+        return self.web_url_value or ""
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        project_breadcrumb: Breadcrumb,
+        project_key: str,
+        site_url: str | None = None,
+    ) -> ZephyrTestCaseEntity:
+        """Build a ZephyrTestCaseEntity from the raw Zephyr Scale API response."""
+        key = data.get("key", "unknown")
+        tc_id = str(data.get("id", key))
+        created_time = _parse_datetime(data.get("createdOn")) or datetime.utcnow()
+        updated_time = _parse_datetime(data.get("updatedOn")) or created_time
+
+        status = data.get("status") or {}
+        priority = data.get("priority") or {}
+        folder = data.get("folder") or {}
+
+        web_url_value = (
+            f"{site_url}/plugins/servlet/ac/com.kanoah.test-manager/"
+            f"testcase-details?testCaseKey={key}"
+            if site_url
+            else None
+        )
+
+        return cls(
+            entity_id=tc_id,
+            breadcrumbs=[project_breadcrumb],
+            name=data.get("name", key),
+            created_at=created_time,
+            updated_at=updated_time,
+            test_case_id=tc_id,
+            test_case_key=key,
+            objective=data.get("objective"),
+            precondition=data.get("precondition"),
+            status_name=status.get("name") if isinstance(status, dict) else None,
+            priority_name=priority.get("name") if isinstance(priority, dict) else None,
+            folder_path=folder.get("name") if isinstance(folder, dict) else None,
+            project_key=project_key,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+        )
+
+
+class ZephyrTestCycleEntity(BaseEntity):
+    """Schema for a Zephyr Scale Test Cycle.
+
+    Test cycles have keys in the format PROJECT-R### (e.g., PROJ-R1, PROJ-R2).
+    They represent a collection of test executions for a specific testing iteration.
+
+    Reference:
+        https://support.smartbear.com/zephyr-scale-cloud/api-docs/#tag/Test-Cycles
+    """
+
+    test_cycle_id: str = ConnectorContextField(
+        ..., description="Unique internal identifier for the test cycle.", is_entity_id=True
+    )
+    test_cycle_key: str = ConnectorContextField(
+        ...,
+        description="Zephyr Scale key for the test cycle (e.g., 'PROJ-R1').",
+        embeddable=True,
+    )
+    name: str = ConnectorContextField(
+        ..., description="Name/title of the test cycle.", embeddable=True, is_name=True
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Description of the test cycle.", embeddable=True
+    )
+    status_name: Optional[str] = ConnectorContextField(
+        None,
+        description="Current status of the test cycle (e.g., Not Executed, In Progress, Done).",
+        embeddable=True,
+    )
+    folder_path: Optional[str] = ConnectorContextField(
+        None, description="Folder path where the test cycle is organized.", embeddable=True
+    )
+    project_key: str = ConnectorContextField(
+        ..., description="Key of the Jira project this test cycle belongs to.", embeddable=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test cycle was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test cycle was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="Link to the test cycle in Zephyr Scale.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """UI link for the Zephyr Scale test cycle."""
+        return self.web_url_value or ""
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        project_breadcrumb: Breadcrumb,
+        project_key: str,
+        site_url: str | None = None,
+    ) -> ZephyrTestCycleEntity:
+        """Build a ZephyrTestCycleEntity from the raw Zephyr Scale API response."""
+        key = data.get("key", "unknown")
+        tc_id = str(data.get("id", key))
+        created_time = _parse_datetime(data.get("createdOn")) or datetime.utcnow()
+        updated_time = _parse_datetime(data.get("updatedOn")) or created_time
+
+        status = data.get("status") or {}
+        folder = data.get("folder") or {}
+
+        web_url_value = (
+            f"{site_url}/plugins/servlet/ac/com.kanoah.test-manager/"
+            f"testcycle-details?testCycleKey={key}"
+            if site_url
+            else None
+        )
+
+        return cls(
+            entity_id=tc_id,
+            breadcrumbs=[project_breadcrumb],
+            name=data.get("name", key),
+            created_at=created_time,
+            updated_at=updated_time,
+            test_cycle_id=tc_id,
+            test_cycle_key=key,
+            description=data.get("description"),
+            status_name=status.get("name") if isinstance(status, dict) else None,
+            folder_path=folder.get("name") if isinstance(folder, dict) else None,
+            project_key=project_key,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+        )
+
+
+class ZephyrTestPlanEntity(BaseEntity):
+    """Schema for a Zephyr Scale Test Plan.
+
+    Test plans have keys in the format PROJECT-P### (e.g., PROJ-P1, PROJ-P2).
+    They represent a high-level collection of test cycles for release planning.
+
+    Reference:
+        https://support.smartbear.com/zephyr-scale-cloud/api-docs/#tag/Test-Plans
+    """
+
+    test_plan_id: str = ConnectorContextField(
+        ..., description="Unique internal identifier for the test plan.", is_entity_id=True
+    )
+    test_plan_key: str = ConnectorContextField(
+        ...,
+        description="Zephyr Scale key for the test plan (e.g., 'PROJ-P1').",
+        embeddable=True,
+    )
+    name: str = ConnectorContextField(
+        ..., description="Name/title of the test plan.", embeddable=True, is_name=True
+    )
+    objective: Optional[str] = ConnectorContextField(
+        None, description="Objective or purpose of the test plan.", embeddable=True
+    )
+    status_name: Optional[str] = ConnectorContextField(
+        None,
+        description="Current status of the test plan (e.g., Draft, Approved, Archived).",
+        embeddable=True,
+    )
+    folder_path: Optional[str] = ConnectorContextField(
+        None, description="Folder path where the test plan is organized.", embeddable=True
+    )
+    project_key: str = ConnectorContextField(
+        ..., description="Key of the Jira project this test plan belongs to.", embeddable=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test plan was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="Timestamp when the test plan was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="Link to the test plan in Zephyr Scale.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """UI link for the Zephyr Scale test plan."""
+        return self.web_url_value or ""
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        project_breadcrumb: Breadcrumb,
+        project_key: str,
+        site_url: str | None = None,
+    ) -> ZephyrTestPlanEntity:
+        """Build a ZephyrTestPlanEntity from the raw Zephyr Scale API response."""
+        key = data.get("key", "unknown")
+        tp_id = str(data.get("id", key))
+        created_time = _parse_datetime(data.get("createdOn")) or datetime.utcnow()
+        updated_time = _parse_datetime(data.get("updatedOn")) or created_time
+
+        status = data.get("status") or {}
+        folder = data.get("folder") or {}
+
+        web_url_value = (
+            f"{site_url}/plugins/servlet/ac/com.kanoah.test-manager/"
+            f"testplan-details?testPlanKey={key}"
+            if site_url
+            else None
+        )
+
+        return cls(
+            entity_id=tp_id,
+            breadcrumbs=[project_breadcrumb],
+            name=data.get("name", key),
+            created_at=created_time,
+            updated_at=updated_time,
+            test_plan_id=tp_id,
+            test_plan_key=key,
+            objective=data.get("objective"),
+            status_name=status.get("name") if isinstance(status, dict) else None,
+            folder_path=folder.get("name") if isinstance(folder, dict) else None,
+            project_key=project_key,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+        )
