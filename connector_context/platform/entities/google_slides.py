@@ -1,0 +1,275 @@
+"""Google Slides entity schemas.
+
+Entity schemas for Google Slides based on Google Slides API and Google Drive API.
+Google Slides presentations are exported as PDF/PPTX and represented as FileEntity objects
+that get processed through Connector Context's file processing pipeline.
+
+References:
+    https://developers.google.com/slides/api/reference/rest
+    https://developers.google.com/drive/api/v3/reference/files
+    https://developers.google.com/drive/api/guides/manage-downloads
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import computed_field
+
+from connector_context.platform.entities._connector_context_field import ConnectorContextField
+from connector_context.platform.entities._base import BaseEntity, FileEntity
+
+
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse RFC3339 timestamps returned by Google APIs."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+class GoogleSlidesPresentationEntity(FileEntity):
+    """Schema for a Google Slides presentation.
+
+    Represents a Google Slides presentation retrieved via the Google Drive API.
+    The presentation content is exported as PDF and processed through
+    Connector Context's file processing pipeline to create searchable chunks.
+
+    Reference:
+        https://developers.google.com/slides/api/reference/rest/v1/presentations
+        https://developers.google.com/drive/api/v3/reference/files
+    """
+
+    presentation_id: str = ConnectorContextField(
+        ...,
+        description="Unique Google Drive file ID of the presentation.",
+        is_entity_id=True,
+    )
+    title: str = ConnectorContextField(
+        ...,
+        description="Display title of the presentation (without file extension).",
+        embeddable=True,
+        is_name=True,
+    )
+    created_time: datetime = ConnectorContextField(
+        ...,
+        description="When the presentation was created.",
+        is_created_at=True,
+    )
+    modified_time: datetime = ConnectorContextField(
+        ...,
+        description="When the presentation was last modified.",
+        is_updated_at=True,
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Optional description of the presentation.", embeddable=True
+    )
+    starred: bool = ConnectorContextField(
+        False, description="Whether the user has starred this presentation.", embeddable=True
+    )
+    trashed: bool = ConnectorContextField(
+        False, description="Whether the presentation is in the trash.", embeddable=False
+    )
+    explicitly_trashed: bool = ConnectorContextField(
+        False,
+        description="Whether the presentation was explicitly trashed by the user.",
+        embeddable=False,
+    )
+    shared: bool = ConnectorContextField(
+        False, description="Whether the presentation is shared with others.", embeddable=True
+    )
+    shared_with_me_time: Optional[datetime] = ConnectorContextField(
+        None, description="Time when this presentation was shared with the user.", embeddable=False
+    )
+    sharing_user: Optional[Dict[str, Any]] = ConnectorContextField(
+        None, description="User who shared this presentation.", embeddable=True
+    )
+    owners: List[Dict[str, Any]] = ConnectorContextField(
+        default_factory=list, description="Owners of the presentation.", embeddable=True
+    )
+    permissions: Optional[List[Dict[str, Any]]] = ConnectorContextField(
+        None, description="Permissions for this presentation.", embeddable=False
+    )
+    parents: List[str] = ConnectorContextField(
+        default_factory=list,
+        description="IDs of parent folders containing this presentation.",
+        embeddable=False,
+    )
+    web_view_link: Optional[str] = ConnectorContextField(
+        None,
+        description="Link to open the presentation in Google Slides editor.",
+        embeddable=False,
+        unhashable=True,
+    )
+    icon_link: Optional[str] = ConnectorContextField(
+        None, description="Link to the presentation's icon.", embeddable=False
+    )
+    modified_by_me_time: Optional[datetime] = ConnectorContextField(
+        None, description="Last time the user modified the presentation.", embeddable=False
+    )
+    viewed_by_me_time: Optional[datetime] = ConnectorContextField(
+        None, description="Last time the user viewed the presentation.", embeddable=False
+    )
+    version: Optional[int] = ConnectorContextField(
+        None, description="Version number of the presentation.", embeddable=True
+    )
+    slide_count: Optional[int] = ConnectorContextField(
+        None, description="Number of slides in the presentation.", embeddable=True
+    )
+    locale: Optional[str] = ConnectorContextField(
+        None, description="The locale of the presentation.", embeddable=True
+    )
+    revision_id: Optional[str] = ConnectorContextField(
+        None, description="The revision ID of the presentation.", embeddable=False
+    )
+    export_mime_type: Optional[str] = ConnectorContextField(
+        default="application/pdf",
+        description="MIME type used for exporting the presentation content (PDF).",
+        embeddable=False,
+    )
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> GoogleSlidesPresentationEntity:
+        """Create entity from Google Drive API file metadata."""
+        file_id = data["id"]
+        download_url = (
+            f"https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType=application/pdf"
+        )
+
+        created_time = _parse_dt(data.get("createdTime"))
+        modified_time = _parse_dt(data.get("modifiedTime"))
+
+        now = datetime.utcnow()
+        fallback_modified = modified_time or created_time or now
+        created_time = created_time or fallback_modified
+        modified_time = fallback_modified
+
+        pres_name = data.get("name", "Untitled Presentation")
+        pres_name_with_ext = f"{pres_name}.pdf" if not pres_name.endswith(".pdf") else pres_name
+
+        return cls(
+            breadcrumbs=[],
+            name=pres_name_with_ext,
+            created_at=created_time,
+            updated_at=modified_time,
+            url=download_url,
+            size=int(data.get("size") or 0),
+            file_type="google_slides",
+            mime_type="application/pdf",
+            local_path=None,
+            presentation_id=file_id,
+            title=data.get("name") or "Untitled Presentation",
+            description=data.get("description"),
+            starred=data.get("starred", False),
+            trashed=data.get("trashed", False),
+            explicitly_trashed=data.get("explicitlyTrashed", False),
+            shared=data.get("shared", False),
+            shared_with_me_time=_parse_dt(data.get("sharedWithMeTime")),
+            sharing_user=data.get("sharingUser"),
+            owners=data.get("owners", []),
+            permissions=data.get("permissions"),
+            parents=data.get("parents", []),
+            web_view_link=data.get("webViewLink"),
+            icon_link=data.get("iconLink"),
+            created_time=created_time,
+            modified_time=modified_time,
+            modified_by_me_time=_parse_dt(data.get("modifiedByMeTime")),
+            viewed_by_me_time=_parse_dt(data.get("viewedByMeTime")),
+            version=data.get("version"),
+            export_mime_type="application/pdf",
+        )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Link to open the presentation in Google Slides."""
+        if self.web_view_link:
+            return self.web_view_link
+        return f"https://docs.google.com/presentation/d/{self.presentation_id}/edit"
+
+
+class GoogleSlidesSlideEntity(BaseEntity):
+    """Schema for a Google Slides slide.
+
+    Represents an individual slide within a Google Slides presentation.
+    This entity captures slide-specific metadata and content for detailed
+    indexing and search capabilities.
+
+    Reference:
+        https://developers.google.com/slides/api/reference/rest/v1/presentations.pages
+    """
+
+    # Base fields are inherited from BaseEntity:
+    # - entity_id (the slide ID)
+    # - breadcrumbs (presentation breadcrumb)
+    # - name (slide title or "Slide {number}")
+    # - created_at (from created_time if available)
+    # - updated_at (from modified_time if available)
+
+    # API fields
+    slide_id: str = ConnectorContextField(
+        ...,
+        description="Unique ID of the slide within the presentation.",
+        embeddable=False,
+        is_entity_id=True,
+    )
+    presentation_id: str = ConnectorContextField(
+        ..., description="ID of the parent presentation containing this slide.", embeddable=False
+    )
+    slide_number: int = ConnectorContextField(
+        ..., description="The zero-based index of the slide in the presentation.", embeddable=True
+    )
+    title: str = ConnectorContextField(
+        ...,
+        description="Title of the slide (or generated fallback).",
+        embeddable=True,
+        is_name=True,
+    )
+    notes: Optional[str] = ConnectorContextField(
+        None, description="Speaker notes for the slide.", embeddable=True
+    )
+    layout_type: Optional[str] = ConnectorContextField(
+        None, description="The type of slide layout.", embeddable=False
+    )
+    master_properties: Optional[Dict[str, Any]] = ConnectorContextField(
+        None, description="Properties of the slide master.", embeddable=False
+    )
+    elements: List[Dict[str, Any]] = ConnectorContextField(
+        default_factory=list, description="List of elements on the slide.", embeddable=False
+    )
+    text_content: Optional[str] = ConnectorContextField(
+        None, description="Extracted text content from all elements on the slide.", embeddable=True
+    )
+    background: Optional[Dict[str, Any]] = ConnectorContextField(
+        None, description="Background properties of the slide.", embeddable=False
+    )
+    color_scheme: Optional[Dict[str, Any]] = ConnectorContextField(
+        None, description="Color scheme of the slide.", embeddable=False
+    )
+    created_time: Optional[datetime] = ConnectorContextField(
+        None, description="When the slide was created.", embeddable=False
+    )
+    modified_time: Optional[datetime] = ConnectorContextField(
+        None, description="When the slide was last modified.", embeddable=False
+    )
+    presentation_title: Optional[str] = ConnectorContextField(
+        None, description="Title of the parent presentation.", embeddable=True
+    )
+    presentation_url: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view the parent presentation.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """URL to view this slide within its presentation."""
+        if self.presentation_url:
+            return self.presentation_url
+        return (
+            f"https://docs.google.com/presentation/d/{self.presentation_id}/edit"
+            f"#slide=id.{self.slide_id}"
+        )

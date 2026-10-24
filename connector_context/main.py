@@ -1,0 +1,195 @@
+"""Main module of the FastAPI application.
+
+This module sets up the FastAPI application and the middleware to log incoming requests
+and unhandled exceptions.
+"""
+
+import os
+import subprocess
+import sys
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
+
+from connector_context.api.middleware import (
+    DynamicCORSMiddleware,
+    add_request_id,
+    connector_context_exception_handler,
+    analytics_middleware,
+    exception_logging_middleware,
+    http_metrics_middleware,
+    invalid_input_exception_handler,
+    invalid_state_exception_handler,
+    log_requests,
+    not_found_exception_handler,
+    permission_exception_handler,
+    rate_limit_exception_handler,
+    rate_limit_headers_middleware,
+    request_body_size_middleware,
+    request_timeout_middleware,
+    validation_exception_handler,
+)
+from connector_context.api.router import TrailingSlashRouter
+from connector_context.api.v1.api import api_router
+from connector_context.core.config import settings
+from connector_context.core.exceptions import (
+    ConnectorContextException,
+    InvalidInputError,
+    InvalidStateError,
+    NotFoundException,
+    PermissionException,
+    RateLimitExceededException,
+)
+from connector_context.core.logging import logger
+from connector_context.db.init_db import init_db
+from connector_context.db.session import AsyncSessionLocal
+from connector_context.domains.embedders.config import validate_embedding_config
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events.
+
+    Initializes the DI container, runs alembic migrations, and syncs platform components.
+    """
+    # Initialize the dependency injection container (fail fast if wiring is broken)
+    from connector_context.core import container as container_mod
+    from connector_context.core.container import initialize_container
+
+    logger.info("Initializing dependency injection container...")
+    initialize_container(settings)
+    logger.info("Container initialized successfully")
+
+    async with AsyncSessionLocal() as db:
+        if settings.RUN_ALEMBIC_MIGRATIONS:
+            logger.info("Running alembic migrations...")
+            env = os.environ.copy()
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            env["PYTHONPATH"] = backend_dir
+            subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                check=True,
+                cwd=backend_dir,
+                env=env,
+            )
+        await init_db(db)
+
+        # Reconcile embedding config against DB deployment metadata
+        await validate_embedding_config(db)
+
+    # Initialize system-level Temporal schedules (cleanup, API key notifications)
+    try:
+        logger.info("Initializing system Temporal schedules...")
+        await container_mod.container.temporal_schedule_service.ensure_system_schedules()
+        logger.info("System Temporal schedules initialized successfully")
+    except Exception as e:
+        logger.warning(
+            f"Failed to initialize system schedules (Temporal may not be available): {e}"
+        )
+
+    # Start metrics sidecar + DB pool sampler; wire app.state.http_metrics
+    from connector_context.core.metrics_service import metrics_lifespan
+    from connector_context.db.session import async_engine
+
+    async with metrics_lifespan(app, container_mod.container.metrics, async_engine.pool):
+        yield
+
+    container_mod.container.health.shutting_down = True
+
+    # Clean up health check engine connections
+    from connector_context.db.session import health_check_engine
+
+    await health_check_engine.dispose()
+
+
+# Create FastAPI app with our custom router and disable FastAPI's built-in redirects
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
+    router=TrailingSlashRouter(),
+    redirect_slashes=False,  # Critical: disable FastAPI's built-in slash redirects
+)
+
+app.include_router(api_router)
+
+# Register middleware directly in the correct order.
+# Order matters: first registered = outermost (processes request first).
+# http_metrics_middleware is intentionally early so it captures
+# end-to-end latency and counts 413/408/429 responses generated
+# by inner middlewares (body-size, timeout, rate-limit).
+app.middleware("http")(add_request_id)
+app.middleware("http")(http_metrics_middleware)
+app.middleware("http")(request_body_size_middleware)
+app.middleware("http")(request_timeout_middleware)
+app.middleware("http")(rate_limit_headers_middleware)
+app.middleware("http")(log_requests)
+app.middleware("http")(analytics_middleware)
+app.middleware("http")(exception_logging_middleware)
+
+# Register exception handlers
+app.exception_handler(RequestValidationError)(validation_exception_handler)
+app.exception_handler(ValidationError)(validation_exception_handler)
+app.exception_handler(PermissionException)(permission_exception_handler)
+app.exception_handler(NotFoundException)(not_found_exception_handler)
+app.exception_handler(RateLimitExceededException)(rate_limit_exception_handler)
+app.exception_handler(InvalidStateError)(invalid_state_exception_handler)
+app.exception_handler(InvalidInputError)(invalid_input_exception_handler)
+
+# Register custom Connector Context exception handlers
+app.exception_handler(ConnectorContextException)(connector_context_exception_handler)
+
+# Default CORS origins - white labels and environment variables can extend this
+CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "localhost:8001",
+    "http://localhost:8080",
+    "https://app.dev-connector-context.com",
+    "https://app.stg-connector-context.com",
+    "https://app.connector-context.ai",
+    "https://connect.dev-connector-context.com",
+    "https://docs.connector-context.ai",
+    "localhost:3000",
+]
+
+if settings.ADDITIONAL_CORS_ORIGINS:
+    origins = settings.ADDITIONAL_CORS_ORIGINS
+    additional_origins = origins.split(",") if isinstance(origins, str) else origins
+    if settings.ENVIRONMENT == "local":
+        CORS_ORIGINS.append("*")
+    else:
+        CORS_ORIGINS.extend(additional_origins)
+
+# Add the dynamic CORS middleware that handles both default origins and white label specific origins
+app.add_middleware(
+    DynamicCORSMiddleware,
+    default_origins=CORS_ORIGINS,
+)
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def show_docs_reference() -> HTMLResponse:
+    """Root endpoint to display the API documentation.
+
+    Returns:
+    -------
+        HTMLResponse: The HTML content to display the API documentation.
+
+    """
+    html_content = """
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Connector Context API</title>
+    </head>
+    <body>
+        <h1>Welcome to the Connector Context API</h1>
+        <p>Please visit the <a href="https://docs.connector-context.ai">docs</a> for more information.</p>
+    </body>
+</html>
+    """
+    return HTMLResponse(content=html_content)

@@ -243,4 +243,3 @@ Ensure your local Temporal server is running and accessible:
 curl http://localhost:7233
 ```
 
-If workflows get stuck, verify the Temporal Worker process is active.

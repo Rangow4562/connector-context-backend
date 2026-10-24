@@ -1,0 +1,63 @@
+"""API routes for the FastAPI application."""
+
+from connector_context.api.router import TrailingSlashRouter
+from connector_context.api.v1.endpoints import (
+    admin,
+    api_keys,
+    auth_providers,
+    billing,
+    browse_tree,
+    collections,
+    connect,
+    entities,
+    entity_counts,
+    file_retrieval,
+    health,
+    organizations,
+    scope,
+    search,
+    search_legacy,
+    source_connections,
+    source_rate_limits,
+    sources,
+    sync,
+    usage,
+    users,
+    webhooks,
+)
+
+# Use our custom router that handles trailing slashes
+api_router = TrailingSlashRouter()
+api_router.include_router(health.router, prefix="/health", tags=["health"])
+api_router.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(organizations.router, prefix="/organizations", tags=["organizations"])
+api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
+api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
+api_router.include_router(sources.router, prefix="/sources", tags=["sources"])
+api_router.include_router(scope.router, prefix="/sources", tags=["sources"])
+api_router.include_router(auth_providers.router, prefix="/auth-providers", tags=["auth-providers"])
+api_router.include_router(collections.router, prefix="/collections", tags=["collections"])
+api_router.include_router(
+    search_legacy.router, prefix="/collections", tags=["legacy-search"], include_in_schema=False
+)
+api_router.include_router(search.router, prefix="/collections", tags=["collections"])
+api_router.include_router(
+    source_connections.router, prefix="/source-connections", tags=["source-connections"]
+)
+api_router.include_router(
+    source_rate_limits.router, prefix="/source-rate-limits", tags=["source-rate-limits"]
+)
+api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
+api_router.include_router(entities.router, prefix="/entities", tags=["entities"])
+api_router.include_router(entity_counts.router, prefix="/entity-counts", tags=["entity-counts"])
+api_router.include_router(file_retrieval.router, prefix="/files", tags=["files"])
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(search.admin_router, prefix="/admin/collections", tags=["admin"])
+api_router.include_router(
+    browse_tree.router,
+    prefix="/source-connections",
+    tags=["browse-tree"],
+)
+api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+api_router.include_router(connect.router, prefix="/connect", tags=["connect"])

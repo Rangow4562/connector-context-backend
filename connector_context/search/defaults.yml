@@ -1,0 +1,226 @@
+search_defaults:
+  offset: 0
+  limit: 100
+
+  retrieval_strategy: hybrid
+
+  expand_query: true
+  interpret_filters: false
+  rerank: true
+  generate_answer: true
+
+# Model specifications per provider
+# These define what each provider's models support.
+# EMBEDDING_DIMENSIONS in .env defines what the user wants to use.
+# At startup, we validate that the selected provider supports the configured dimensions.
+provider_models:
+  openai:
+    llm_big:
+      name: "gpt-5"
+      tokenizer: "cl100k_base"
+      context_window: 400000
+    llm_small:
+      name: "gpt-5-nano"
+      tokenizer: "cl100k_base"
+      context_window: 400000
+    # OpenAI text-embedding-3-* models support dimension reduction via API
+    # Can output any dimension up to their max (3072 for large, 1536 for small)
+    embedding_large:
+      name: "text-embedding-3-large"
+      tokenizer: "cl100k_base"
+      dimensions: 3072
+      max_tokens: 8192
+    embedding_small:
+      name: "text-embedding-3-small"
+      tokenizer: "cl100k_base"
+      dimensions: 1536
+      max_tokens: 8192
+    embedding:
+      name: "text-embedding-3-small"
+      tokenizer: "cl100k_base"
+      dimensions: 1536
+      max_tokens: 8192
+    rerank:
+      name: "gpt-5-nano"
+      tokenizer: "cl100k_base"
+      context_window: 400000
+
+  groq:
+    llm_big:
+      name: "openai/gpt-oss-120b"
+      tokenizer: "o200k_harmony"
+      context_window: 128000
+    llm_small:
+      name: "openai/gpt-oss-20b"
+      tokenizer: "o200k_harmony"
+      context_window: 128000
+    embedding: null
+    rerank:
+      name: "openai/gpt-oss-120b"
+      tokenizer: "o200k_harmony"
+      context_window: 128000
+
+  cerebras:
+    llm:
+      name: "gpt-oss-120b"
+      tokenizer: "o200k_harmony"
+      context_window: 131000
+    embedding: null
+    rerank: null
+
+  cohere:
+    llm: null
+    embedding: null
+    rerank:
+      name: "rerank-v3.5"
+      tokenizer: "cl100k_base"
+      max_tokens_per_doc: 8192
+      max_documents: 1000
+
+  mistral:
+    llm_big:
+      name: "mistral-large-latest"
+      tokenizer: "mistral-large-latest"  # Uses native Mistral tokenizer
+      context_window: 128000
+    llm_small:
+      name: "mistral-small-latest"
+      tokenizer: "mistral-small-latest"  # Uses native Mistral tokenizer
+      context_window: 32000
+    # Mistral mistral-embed outputs fixed 1024 dimensions (no custom dimension support)
+    embedding:
+      name: "mistral-embed"
+      tokenizer: "mistral-embed"
+      dimensions: 1024  # Fixed, not configurable
+      max_tokens: 8192
+    rerank:
+      name: "mistral-small-latest"
+      tokenizer: "mistral-small-latest"  # Uses native Mistral tokenizer
+      context_window: 32000
+
+  # Local embedding provider using text2vec-transformers container
+  # No API key required - requires TEXT2VEC_INFERENCE_URL to be set
+  # Start with: docker compose --profile local-embeddings up
+  # NOTE: LocalProvider implementation pending - use OpenAI or Mistral for now
+  local:
+    llm: null  # No LLM support - local is embeddings only
+    # all-MiniLM-L6-v2 model (default in docker-compose.yml)
+    # Fast, lightweight, good quality for most use cases
+    embedding:
+      name: "sentence-transformers/all-MiniLM-L6-v2"
+      tokenizer: "cl100k_base"  # Approximation for token counting
+      dimensions: 384
+      max_tokens: 512  # Model's actual max sequence length
+    rerank: null  # No rerank support - local is embeddings only
+
+# Operation preferences - which provider and which models to use
+# Format: provider: {llm: model_key, embedding: model_key, rerank: model_key}
+operation_preferences:
+  query_expansion:
+    order:
+      - provider: cerebras
+        llm: llm
+        embedding: null
+        rerank: null
+      - provider: groq
+        llm: llm_big
+        embedding: null
+        rerank: null
+      - provider: mistral
+        llm: llm_small
+        embedding: null
+        rerank: null
+      - provider: openai
+        llm: llm_small
+        embedding: null
+        rerank: null
+
+  query_interpretation:
+    order:
+      - provider: cerebras
+        llm: llm
+        embedding: null
+        rerank: null
+      - provider: groq
+        llm: llm_big
+        embedding: null
+        rerank: null
+      - provider: mistral
+        llm: llm_small
+        embedding: null
+        rerank: null
+      - provider: openai
+        llm: llm_small
+        embedding: null
+        rerank: null
+
+  embed_query:
+    order:
+      - provider: openai
+        llm: null
+        embedding: embedding
+        rerank: null
+      - provider: mistral
+        llm: null
+        embedding: embedding
+        rerank: null
+      - provider: local
+        llm: null
+        embedding: embedding
+        rerank: null
+
+  reranking:
+    order:
+      - provider: cohere
+        llm: null
+        embedding: null
+        rerank: rerank
+      - provider: groq
+        llm: llm_small
+        embedding: null
+        rerank: rerank
+      - provider: mistral
+        llm: llm_small
+        embedding: null
+        rerank: rerank
+      - provider: openai
+        llm: llm_small
+        embedding: null
+        rerank: rerank
+
+  generate_answer:
+    order:
+      - provider: cerebras
+        llm: llm
+        embedding: null
+        rerank: null
+      - provider: groq
+        llm: llm_big
+        embedding: null
+        rerank: null
+      - provider: mistral
+        llm: llm_small
+        embedding: null
+        rerank: null
+      - provider: openai
+        llm: llm_small
+        embedding: null
+        rerank: null
+
+  federated_search:
+    order:
+      - provider: cerebras
+        llm: llm
+        embedding: null
+        rerank: null
+      - provider: groq
+        llm: llm_big
+        embedding: null
+        rerank: null
+      - provider: mistral
+        llm: llm_small
+        embedding: null
+        rerank: null
+      - provider: openai
+        llm: llm_small
+        embedding: null
+        rerank: null

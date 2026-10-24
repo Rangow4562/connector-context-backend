@@ -1,0 +1,398 @@
+"""Entity schemas for Apollo.
+
+MVP entities: Contacts, Accounts, Sequences, Email Activities.
+API reference: https://docs.apollo.io/
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import Field, computed_field, field_validator
+
+from connector_context.platform.entities._connector_context_field import ConnectorContextField
+from connector_context.platform.entities._base import BaseEntity, Breadcrumb
+
+_APP_URL = "https://app.apollo.io"
+
+
+def _parse_apollo_datetime(value: Any) -> Optional[datetime]:
+    """Parse Apollo datetime (ISO string or None)."""
+    if not value or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+    return None
+
+
+class ApolloAccountEntity(BaseEntity):
+    """Schema for Apollo account (company) entities.
+
+    From POST /accounts/search. Accounts are companies added to your Apollo database.
+    """
+
+    account_id: str = ConnectorContextField(..., description="Apollo account ID.", is_entity_id=True)
+    name: str = ConnectorContextField(
+        ..., description="Account/company name.", is_name=True, embeddable=True
+    )
+    domain: Optional[str] = ConnectorContextField(
+        None, description="Primary domain of the account.", embeddable=True
+    )
+    created_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the account was created.", is_created_at=True
+    )
+    updated_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the account was last updated.", is_updated_at=True
+    )
+    source: Optional[str] = ConnectorContextField(
+        None, description="Source of the account (e.g. api, csv_import).", embeddable=True
+    )
+    source_display_name: Optional[str] = ConnectorContextField(
+        None, description="Human-readable source name.", embeddable=True
+    )
+    num_contacts: Optional[int] = Field(
+        None, description="Number of contacts linked to this account."
+    )
+    last_activity_date: Optional[datetime] = ConnectorContextField(
+        None, description="Last activity date on the account.", embeddable=True
+    )
+    label_ids: List[str] = Field(
+        default_factory=list, description="Label IDs applied to the account."
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view this account in Apollo.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> ApolloAccountEntity:
+        """Construct from Apollo /accounts/search response dict."""
+        acc_id = data["id"]
+        created_at = data.get("created_at")
+        updated_at = data.get("updated_at") or created_at
+        return cls(
+            entity_id=acc_id,
+            breadcrumbs=[],
+            account_id=acc_id,
+            name=data.get("name") or data.get("domain") or acc_id,
+            domain=data.get("domain"),
+            created_at=created_at,
+            updated_at=updated_at,
+            source=data.get("source"),
+            source_display_name=data.get("source_display_name"),
+            num_contacts=data.get("num_contacts"),
+            last_activity_date=data.get("last_activity_date"),
+            label_ids=data.get("label_ids") or [],
+            web_url_value=f"{_APP_URL}/accounts/{acc_id}",
+        )
+
+    @field_validator("created_at", "updated_at", "last_activity_date", mode="before")
+    @classmethod
+    def parse_datetime_fields(cls, value: Any) -> Optional[datetime]:
+        """Parse Apollo datetime (ISO string or None) to datetime."""
+        return _parse_apollo_datetime(value)
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Return the web URL to view this account in Apollo, or empty string."""
+        return self.web_url_value or ""
+
+
+class ApolloContactEntity(BaseEntity):
+    """Schema for Apollo contact entities.
+
+    From POST /contacts/search. Contacts are people added to your Apollo database.
+    """
+
+    contact_id: str = ConnectorContextField(..., description="Apollo contact ID.", is_entity_id=True)
+    name: str = ConnectorContextField(
+        ..., description="Full name of the contact.", is_name=True, embeddable=True
+    )
+    first_name: Optional[str] = ConnectorContextField(None, description="First name.", embeddable=True)
+    last_name: Optional[str] = ConnectorContextField(None, description="Last name.", embeddable=True)
+    email: Optional[str] = ConnectorContextField(None, description="Email address.", embeddable=True)
+    title: Optional[str] = ConnectorContextField(None, description="Job title.", embeddable=True)
+    organization_name: Optional[str] = ConnectorContextField(
+        None, description="Current organization name.", embeddable=True
+    )
+    account_id: Optional[str] = Field(
+        None, description="Apollo account ID this contact belongs to."
+    )
+    account_name: Optional[str] = ConnectorContextField(
+        None, description="Account/company name.", embeddable=True
+    )
+    created_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the contact was created.", is_created_at=True
+    )
+    updated_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the contact was last updated.", is_updated_at=True
+    )
+    email_status: Optional[str] = ConnectorContextField(
+        None, description="Email verification status.", embeddable=True
+    )
+    source_display_name: Optional[str] = ConnectorContextField(
+        None, description="Human-readable source.", embeddable=True
+    )
+    emailer_campaign_ids: List[str] = Field(
+        default_factory=list, description="Sequence IDs the contact is in."
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view this contact in Apollo.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> ApolloContactEntity:
+        """Construct from Apollo /contacts/search response dict."""
+        contact_id = data["id"]
+        account_id = data.get("account_id")
+        account_data = data.get("account")
+        account_name = account_data.get("name") if isinstance(account_data, dict) else None
+
+        name = (
+            data.get("name")
+            or " ".join(filter(None, [data.get("first_name"), data.get("last_name")]))
+            or data.get("email")
+            or contact_id
+        ).strip() or contact_id
+
+        breadcrumbs: list[Breadcrumb] = []
+        if account_id and account_name:
+            breadcrumbs.append(
+                Breadcrumb(
+                    entity_id=account_id,
+                    name=account_name,
+                    entity_type="ApolloAccountEntity",
+                )
+            )
+
+        return cls(
+            entity_id=contact_id,
+            breadcrumbs=breadcrumbs,
+            contact_id=contact_id,
+            name=name,
+            first_name=data.get("first_name"),
+            last_name=data.get("last_name"),
+            email=data.get("email"),
+            title=data.get("title"),
+            organization_name=data.get("organization_name") or account_name,
+            account_id=account_id,
+            account_name=account_name,
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+            email_status=data.get("email_status"),
+            source_display_name=data.get("source_display_name"),
+            emailer_campaign_ids=data.get("emailer_campaign_ids") or [],
+            web_url_value=f"{_APP_URL}/contacts/{contact_id}",
+        )
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def parse_datetime_fields(cls, value: Any) -> Optional[datetime]:
+        """Parse Apollo datetime (ISO string or None) to datetime."""
+        return _parse_apollo_datetime(value)
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Return the web URL to view this contact in Apollo, or empty string."""
+        return self.web_url_value or ""
+
+
+class ApolloSequenceEntity(BaseEntity):
+    """Schema for Apollo sequence (email campaign) entities.
+
+    From POST /emailer_campaigns/search.
+    """
+
+    sequence_id: str = ConnectorContextField(
+        ..., description="Apollo sequence/campaign ID.", is_entity_id=True
+    )
+    name: str = ConnectorContextField(..., description="Sequence name.", is_name=True, embeddable=True)
+    created_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the sequence was created.", is_created_at=True
+    )
+    active: Optional[bool] = ConnectorContextField(
+        None, description="Whether the sequence is active.", embeddable=True
+    )
+    archived: Optional[bool] = Field(None, description="Whether the sequence is archived.")
+    num_steps: Optional[int] = ConnectorContextField(
+        None, description="Number of steps in the sequence.", embeddable=True
+    )
+    unique_scheduled: Optional[int] = Field(None, description="Count of scheduled emails.")
+    unique_delivered: Optional[int] = Field(None, description="Count of delivered emails.")
+    unique_opened: Optional[int] = Field(None, description="Count of opened emails.")
+    unique_replied: Optional[int] = Field(None, description="Count of replies.")
+    permissions: Optional[str] = Field(
+        None, description="Sequence permissions (e.g. team_can_use)."
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view this sequence in Apollo.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> ApolloSequenceEntity:
+        """Construct from Apollo /emailer_campaigns/search response dict."""
+        seq_id = data["id"]
+        return cls(
+            entity_id=seq_id,
+            breadcrumbs=[],
+            sequence_id=seq_id,
+            name=data.get("name") or seq_id,
+            created_at=data.get("created_at"),
+            active=data.get("active"),
+            archived=data.get("archived"),
+            num_steps=data.get("num_steps"),
+            unique_scheduled=data.get("unique_scheduled"),
+            unique_delivered=data.get("unique_delivered"),
+            unique_opened=data.get("unique_opened"),
+            unique_replied=data.get("unique_replied"),
+            permissions=data.get("permissions"),
+            web_url_value=f"{_APP_URL}/sequences/{seq_id}",
+        )
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def parse_datetime_fields(cls, value: Any) -> Optional[datetime]:
+        """Parse Apollo datetime (ISO string or None) to datetime."""
+        return _parse_apollo_datetime(value)
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Return the web URL to view this sequence in Apollo, or empty string."""
+        return self.web_url_value or ""
+
+
+class ApolloEmailActivityEntity(BaseEntity):
+    """Schema for Apollo email activity (outreach message) entities.
+
+    From GET /emailer_messages/search. Represents emails sent as part of sequences.
+    """
+
+    message_id: str = ConnectorContextField(
+        ..., description="Apollo emailer message ID.", is_entity_id=True
+    )
+    name: str = ConnectorContextField(
+        ...,
+        description="Display name (subject or 'Email to recipient').",
+        is_name=True,
+        embeddable=True,
+    )
+    subject: Optional[str] = ConnectorContextField(None, description="Email subject line.", embeddable=True)
+    status: Optional[str] = ConnectorContextField(
+        None, description="Status (e.g. delivered, scheduled, failed).", embeddable=True
+    )
+    from_email: Optional[str] = ConnectorContextField(None, description="Sender email.", embeddable=True)
+    from_name: Optional[str] = ConnectorContextField(
+        None, description="Sender display name.", embeddable=True
+    )
+    to_email: Optional[str] = ConnectorContextField(None, description="Recipient email.", embeddable=True)
+    to_name: Optional[str] = ConnectorContextField(
+        None, description="Recipient display name.", embeddable=True
+    )
+    body_text: Optional[str] = ConnectorContextField(
+        None, description="Plain-text body (searchable).", embeddable=True
+    )
+    campaign_name: Optional[str] = ConnectorContextField(
+        None, description="Sequence/campaign name.", embeddable=True
+    )
+    emailer_campaign_id: Optional[str] = Field(None, description="Apollo sequence ID.")
+    contact_id: Optional[str] = Field(None, description="Apollo contact ID.")
+    account_id: Optional[str] = Field(None, description="Apollo account ID.")
+    created_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the message was created.", is_created_at=True
+    )
+    completed_at: Optional[datetime] = ConnectorContextField(
+        None, description="When the email was delivered.", is_updated_at=True
+    )
+    due_at: Optional[datetime] = ConnectorContextField(
+        None, description="Scheduled send time.", embeddable=True
+    )
+    failure_reason: Optional[str] = ConnectorContextField(
+        None, description="Reason for failure if status is failed.", embeddable=True
+    )
+    not_sent_reason: Optional[str] = ConnectorContextField(
+        None, description="Reason email was not sent.", embeddable=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view this email in Apollo.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> ApolloEmailActivityEntity:
+        """Construct from Apollo /emailer_messages/search response dict."""
+        msg_id = data["id"]
+        subject = data.get("subject") or "(No subject)"
+        to_name = data.get("to_name") or data.get("to_email") or "unknown"
+        campaign_id = data.get("emailer_campaign_id")
+        campaign_name = data.get("campaign_name")
+        contact_id = data.get("contact_id")
+
+        breadcrumbs: list[Breadcrumb] = []
+        if campaign_id and campaign_name:
+            breadcrumbs.append(
+                Breadcrumb(
+                    entity_id=campaign_id,
+                    name=campaign_name,
+                    entity_type="ApolloSequenceEntity",
+                )
+            )
+        to_display = data.get("to_name") or data.get("to_email") or ""
+        if contact_id and to_display:
+            breadcrumbs.append(
+                Breadcrumb(
+                    entity_id=contact_id,
+                    name=to_display,
+                    entity_type="ApolloContactEntity",
+                )
+            )
+
+        return cls(
+            entity_id=msg_id,
+            breadcrumbs=breadcrumbs,
+            message_id=msg_id,
+            name=f"Email: {subject} to {to_name}",
+            subject=subject,
+            status=data.get("status"),
+            from_email=data.get("from_email"),
+            from_name=data.get("from_name"),
+            to_email=data.get("to_email"),
+            to_name=data.get("to_name"),
+            body_text=data.get("body_text"),
+            campaign_name=campaign_name,
+            emailer_campaign_id=campaign_id,
+            contact_id=contact_id,
+            account_id=data.get("account_id"),
+            created_at=data.get("created_at"),
+            completed_at=data.get("completed_at"),
+            due_at=data.get("due_at"),
+            failure_reason=data.get("failure_reason"),
+            not_sent_reason=data.get("not_sent_reason"),
+            web_url_value=f"{_APP_URL}/sequences/{campaign_id}" if campaign_id else None,
+        )
+
+    @field_validator("created_at", "completed_at", "due_at", mode="before")
+    @classmethod
+    def parse_datetime_fields(cls, value: Any) -> Optional[datetime]:
+        """Parse Apollo datetime (ISO string or None) to datetime."""
+        return _parse_apollo_datetime(value)
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Return the web URL to view this email in Apollo, or empty string."""
+        return self.web_url_value or ""

@@ -1,0 +1,101 @@
+"""Fake sync job repository for testing."""
+
+import uuid as uuid_mod
+from typing import List, Optional
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context.api.context import ApiContext
+from connector_context.db.unit_of_work import UnitOfWork
+from connector_context.models.sync_job import SyncJob
+from connector_context.schemas.sync_job import SyncJobCreate, SyncJobUpdate
+
+
+class FakeSyncJobRepository:
+    """In-memory fake for SyncJobRepositoryProtocol."""
+
+    def __init__(self) -> None:
+        """Initialize with empty stores."""
+        self._store: dict[UUID, SyncJob] = {}
+        self._last_jobs: dict[UUID, SyncJob] = {}
+        self._by_sync: dict[UUID, list[SyncJob]] = {}
+        self._calls: list[tuple] = []
+        self._created: list[SyncJob] = []
+
+    def seed(self, id: UUID, job: SyncJob) -> None:
+        """Seed a sync job by ID."""
+        self._store[id] = job
+
+    def seed_last_job(self, sync_id: UUID, job: SyncJob) -> None:
+        """Seed a last job for a given sync_id."""
+        self._last_jobs[sync_id] = job
+
+    def seed_jobs_for_sync(self, sync_id: UUID, jobs: list[SyncJob]) -> None:
+        """Seed all jobs for a given sync_id."""
+        self._by_sync[sync_id] = jobs
+
+    async def get(self, db: AsyncSession, id: UUID, ctx: ApiContext) -> Optional[SyncJob]:
+        """Return seeded job by ID or None."""
+        self._calls.append(("get", db, id, ctx))
+        return self._store.get(id)
+
+    async def get_latest_by_sync_id(self, db: AsyncSession, sync_id: UUID) -> Optional[SyncJob]:
+        """Return seeded last job or None."""
+        self._calls.append(("get_latest_by_sync_id", db, sync_id))
+        return self._last_jobs.get(sync_id)
+
+    async def get_active_for_sync(
+        self, db: AsyncSession, sync_id: UUID, ctx: ApiContext
+    ) -> List[SyncJob]:
+        """Return seeded active jobs for the sync."""
+        self._calls.append(("get_active_for_sync", db, sync_id, ctx))
+        jobs = self._by_sync.get(sync_id, [])
+        return [j for j in jobs if j.status in ("PENDING", "RUNNING", "CANCELLING")]
+
+    async def get_all_by_sync_id(
+        self,
+        db: AsyncSession,
+        sync_id: UUID,
+        ctx: ApiContext,
+        limit: Optional[int] = None,
+    ) -> List[SyncJob]:
+        """Return all seeded jobs for the sync (newest first; optional limit)."""
+        self._calls.append(("get_all_by_sync_id", db, sync_id, ctx, limit))
+        jobs = list(self._by_sync.get(sync_id, []))
+        jobs.sort(key=lambda j: j.created_at, reverse=True)
+        if limit is not None:
+            jobs = jobs[:limit]
+        return jobs
+
+    async def create(
+        self,
+        db: AsyncSession,
+        obj_in: SyncJobCreate,
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SyncJob:
+        """Create a fake SyncJob from the schema and store it."""
+        self._calls.append(("create", db, obj_in, ctx, uow))
+        valid_fields = {c.key for c in SyncJob.__table__.columns}
+        dumped = {k: v for k, v in obj_in.model_dump().items() if k in valid_fields}
+        if "id" not in dumped or dumped["id"] is None:
+            dumped["id"] = uuid_mod.uuid4()
+        job = SyncJob(**dumped, organization_id=ctx.organization.id)
+        self._store[job.id] = job
+        self._created.append(job)
+        return job
+
+    async def update(
+        self,
+        db: AsyncSession,
+        db_obj: SyncJob,
+        obj_in: SyncJobUpdate,
+        ctx: ApiContext,
+    ) -> SyncJob:
+        """Apply update fields to the db_obj and store it."""
+        self._calls.append(("update", db, db_obj, obj_in, ctx))
+        for field, value in obj_in.model_dump(exclude_unset=True).items():
+            setattr(db_obj, field, value)
+        self._store[db_obj.id] = db_obj
+        return db_obj

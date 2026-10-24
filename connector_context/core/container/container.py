@@ -1,0 +1,290 @@
+"""Dependency Injection Container.
+
+The container is a simple immutable dataclass that holds protocol implementations.
+It has no construction logic — that belongs in the factory.
+
+Design principles:
+- Container serves, factory builds
+- Fail fast: all construction at startup
+- Type safety: fields are protocol types
+- Testing: construct directly with fakes
+"""
+
+from dataclasses import dataclass, replace
+from typing import Any, Optional
+
+from connector_context.core.protocols import (
+    CircuitBreaker,
+    ContextCache,
+    EmailService,
+    EndpointVerifier,
+    EventBus,
+    HealthServiceProtocol,
+    MetricsService,
+    OcrProvider,
+    PubSub,
+    RateLimiter,
+    WebhookAdmin,
+    WebhookPublisher,
+    WebhookServiceProtocol,
+)
+from connector_context.core.protocols.identity import IdentityProvider
+from connector_context.core.protocols.payment import PaymentGatewayProtocol
+from connector_context.domains.access_control.protocols import AccessBrokerProtocol
+from connector_context.domains.arf.protocols import ArfServiceProtocol
+from connector_context.domains.auth_provider.protocols import (
+    AuthProviderRegistryProtocol,
+    AuthProviderServiceProtocol,
+)
+from connector_context.domains.billing.protocols import BillingServiceProtocol, BillingWebhookProtocol
+from connector_context.domains.browse_tree.protocols import (
+    BrowseTreeServiceProtocol,
+    NodeSelectionRepositoryProtocol,
+)
+from connector_context.domains.collections.protocols import (
+    CollectionRepositoryProtocol,
+    CollectionServiceProtocol,
+)
+from connector_context.domains.connect.protocols import ConnectServiceProtocol
+from connector_context.domains.connections.protocols import ConnectionRepositoryProtocol
+from connector_context.domains.converters.protocols import ConverterRegistryProtocol
+from connector_context.domains.credentials.protocols import (
+    IntegrationCredentialRepositoryProtocol,
+    IntegrationCredentialServiceProtocol,
+)
+from connector_context.domains.embedders.protocols import (
+    DenseEmbedderProtocol,
+    DenseEmbedderRegistryProtocol,
+    SparseEmbedderProtocol,
+    SparseEmbedderRegistryProtocol,
+)
+from connector_context.domains.entities.protocols import (
+    EntityDefinitionRegistryProtocol,
+    EntityRepositoryProtocol,
+)
+from connector_context.domains.oauth.protocols import (
+    OAuth1ServiceProtocol,
+    OAuth2ServiceProtocol,
+    OAuthCallbackServiceProtocol,
+    OAuthFlowServiceProtocol,
+    OAuthInitSessionRepositoryProtocol,
+    OAuthRedirectSessionRepositoryProtocol,
+)
+from connector_context.domains.organizations.protocols import (
+    OrganizationServiceProtocol,
+    UserOrganizationRepositoryProtocol,
+)
+from connector_context.domains.search.protocols import (
+    AgenticSearchServiceProtocol,
+    ClassicSearchServiceProtocol,
+    InstantSearchServiceProtocol,
+)
+from connector_context.domains.source_connections.protocols import (
+    ResponseBuilderProtocol,
+    SourceConnectionRepositoryProtocol,
+    SourceConnectionServiceProtocol,
+)
+from connector_context.domains.sources.protocols import (
+    SourceLifecycleServiceProtocol,
+    SourceRegistryProtocol,
+    SourceServiceProtocol,
+)
+from connector_context.domains.storage.protocols import StorageBackend, SyncFileManagerProtocol
+from connector_context.domains.sync_pipeline.protocols import SyncFactoryProtocol
+from connector_context.domains.syncs.cursors.service import SyncCursorService
+from connector_context.domains.syncs.jobs.protocols import (
+    SyncJobRepositoryProtocol,
+    SyncJobServiceProtocol,
+    SyncJobStateMachineProtocol,
+)
+from connector_context.domains.syncs.protocols import (
+    SyncCursorRepositoryProtocol,
+    SyncRepositoryProtocol,
+    SyncServiceProtocol,
+)
+from connector_context.domains.temporal.protocols import (
+    TemporalScheduleServiceProtocol,
+    TemporalWorkflowServiceProtocol,
+)
+from connector_context.domains.usage.protocols import UsageLedgerProtocol, UsageLimitCheckerProtocol
+from connector_context.domains.users.protocols import UserServiceProtocol
+
+
+@dataclass(frozen=True)
+class Container:
+    """Immutable container holding all protocol implementations.
+
+    Usage:
+        # Production: use the global container built by factory
+        from connector_context.core.container import container
+        await container.event_bus.publish(SyncLifecycleEvent(...))
+
+        # Testing: construct directly with fakes (see backend/conftest.py
+        # for the full test_container fixture and Fake* definitions)
+        test_container = Container(event_bus=FakeEventBus(), ...)
+
+        # FastAPI endpoints: use Inject() to pull individual protocols
+        from connector_context.api.deps import Inject
+        async def my_endpoint(event_bus: EventBus = Inject(EventBus)):
+            await event_bus.publish(...)
+    """
+
+    # Context cache (Redis-backed, used by deps.py hot path)
+    context_cache: ContextCache
+
+    # Rate limiter (Redis-backed sliding window, Null for local dev)
+    rate_limiter: RateLimiter
+
+    # Health service — readiness check facade
+    health: HealthServiceProtocol
+
+    # Event bus for domain event fan-out
+    event_bus: EventBus
+
+    # PubSub for realtime message transport (SSE, sync progress)
+    pubsub: PubSub
+
+    # Webhook protocols
+    webhook_publisher: WebhookPublisher
+    webhook_admin: WebhookAdmin
+    endpoint_verifier: EndpointVerifier
+    webhook_service: WebhookServiceProtocol
+
+    # Circuit breaker for provider failover
+    circuit_breaker: CircuitBreaker
+
+    # Metrics (HTTP, agentic search, DB pool — via MetricsService facade)
+    metrics: MetricsService
+
+    # Source service — API-facing source operations
+    source_service: SourceServiceProtocol
+
+    # Source registries (shared across services)
+    source_registry: SourceRegistryProtocol
+    auth_provider_registry: AuthProviderRegistryProtocol
+    auth_provider_service: AuthProviderServiceProtocol
+    entity_definition_registry: EntityDefinitionRegistryProtocol
+
+    # Collection service — domain service for collection lifecycle
+    collection_service: CollectionServiceProtocol
+
+    # Browse tree service — metadata tree browsing and node selection
+    browse_tree_service: BrowseTreeServiceProtocol
+    selection_repo: NodeSelectionRepositoryProtocol
+
+    # Repository protocols (thin wrappers around crud singletons)
+    sc_repo: SourceConnectionRepositoryProtocol
+    collection_repo: CollectionRepositoryProtocol
+    conn_repo: ConnectionRepositoryProtocol
+    cred_repo: IntegrationCredentialRepositoryProtocol
+    credential_service: IntegrationCredentialServiceProtocol
+    user_org_repo: UserOrganizationRepositoryProtocol
+
+    # OAuth services
+    oauth1_service: OAuth1ServiceProtocol
+    oauth2_service: OAuth2ServiceProtocol
+    redirect_session_repo: OAuthRedirectSessionRepositoryProtocol
+    oauth_flow_service: OAuthFlowServiceProtocol
+    oauth_callback_service: OAuthCallbackServiceProtocol
+    init_session_repo: OAuthInitSessionRepositoryProtocol
+
+    # Source connection service — domain service for source connections
+    source_connection_service: SourceConnectionServiceProtocol
+
+    # Source lifecycle — creates/validates configured source instances
+    source_lifecycle_service: SourceLifecycleServiceProtocol
+
+    # Response builder — constructs API responses for source connections
+    response_builder: ResponseBuilderProtocol
+
+    # Sync domain
+    sync_repo: SyncRepositoryProtocol
+    sync_cursor_repo: SyncCursorRepositoryProtocol
+    sync_cursor_service: SyncCursorService
+    sync_job_repo: SyncJobRepositoryProtocol
+    sync_job_service: SyncJobServiceProtocol
+    sync_job_state_machine: SyncJobStateMachineProtocol
+    sync_service: SyncServiceProtocol
+    sync_factory: SyncFactoryProtocol
+
+    entity_repo: EntityRepositoryProtocol
+
+    # Access control broker (resolves user → group principals)
+    access_broker: AccessBrokerProtocol
+
+    # Temporal domain
+    temporal_workflow_service: TemporalWorkflowServiceProtocol
+    temporal_schedule_service: TemporalScheduleServiceProtocol
+
+    # Billing domain
+    billing_service: BillingServiceProtocol
+    billing_webhook: BillingWebhookProtocol
+
+    # Usage domain — read (checker) + write (ledger), both singletons
+    usage_checker: UsageLimitCheckerProtocol
+    usage_ledger: UsageLedgerProtocol
+
+    payment_gateway: PaymentGatewayProtocol
+
+    # Identity provider (Auth0 / Null / Fake)
+    identity_provider: IdentityProvider
+
+    # Email service (Resend / Null / Fake)
+    email_service: EmailService
+
+    # Organization domain service (lifecycle + membership + provisioning)
+    organization_service: OrganizationServiceProtocol
+
+    # User domain service (create-or-update + org queries)
+    user_service: UserServiceProtocol
+
+    # Embedder registries (static reference data, built once at startup)
+    dense_embedder_registry: DenseEmbedderRegistryProtocol
+    sparse_embedder_registry: SparseEmbedderRegistryProtocol
+
+    # Embedder instances (deployment-wide singletons from domains/embedders/)
+    dense_embedder: DenseEmbedderProtocol
+    sparse_embedder: SparseEmbedderProtocol
+
+    # Connect domain service (session-based frontend integration flows)
+    connect_service: ConnectServiceProtocol
+
+    # Search domain (v2 tiers)
+    instant_search: InstantSearchServiceProtocol
+    classic_search: ClassicSearchServiceProtocol
+    agentic_search: AgenticSearchServiceProtocol
+
+    # Storage domain — unified backend for file/object storage
+    storage_backend: StorageBackend
+
+    # Storage domain — sync-aware file manager (CTTI, metadata, caching)
+    sync_file_manager: SyncFileManagerProtocol
+
+    # ARF domain — raw entity capture / replay service
+    arf_service: ArfServiceProtocol
+
+    # Converter registry (maps file extensions to converter instances)
+    converter_registry: ConverterRegistryProtocol
+
+    # Optional fields (default=None) — must be last in frozen dataclass
+    # OCR provider (with fallback chain + circuit breaking)
+    ocr_provider: Optional[OcrProvider] = None
+
+    # -----------------------------------------------------------------
+    # Convenience methods
+    # -----------------------------------------------------------------
+
+    def replace(self, **changes: Any) -> "Container":
+        """Create a new container with some dependencies replaced.
+
+        Useful for partial overrides in tests:
+
+            modified = container.replace(webhook_publisher=FakeWebhookPublisher())
+
+        Args:
+            **changes: Dependency name -> new implementation
+
+        Returns:
+            New Container with specified dependencies replaced
+        """
+        return replace(self, **changes)

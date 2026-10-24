@@ -1,0 +1,1455 @@
+"""Configuration classes for platform components."""
+
+from datetime import datetime
+from typing import Literal, Optional
+
+from pydantic import Field, field_validator
+
+from connector_context.platform.configs._base import BaseConfig, RequiredTemplateConfig
+from connector_context.platform.utils.ssrf import validate_host, validate_url
+
+
+class SourceConfig(BaseConfig):
+    """Source config schema."""
+
+    pass
+
+
+class AirtableConfig(SourceConfig):
+    """Airtable configuration schema."""
+
+    base_id: str = Field(
+        default="",
+        title="Base ID",
+        description=(
+            "Airtable base ID to sync (e.g., 'appXXXXXXXXXXXXXX'). "
+            "If empty, all accessible bases are synced."
+        ),
+    )
+    table_id: str = Field(
+        default="",
+        title="Table ID",
+        description=(
+            "Specific table ID within the base to sync. "
+            "If empty, all tables in the base are synced. Requires Base ID to be set."
+        ),
+    )
+
+
+class AsanaConfig(SourceConfig):
+    """Asana configuration schema."""
+
+    pass
+
+
+class ApolloConfig(SourceConfig):
+    """Apollo configuration schema."""
+
+    pass
+
+
+class AttioConfig(SourceConfig):
+    """Attio configuration schema."""
+
+    pass
+
+
+class BitbucketConfig(SourceConfig):
+    """Bitbucket configuration schema."""
+
+    workspace: str = Field(
+        default="",
+        title="Workspace",
+        description="Bitbucket workspace slug (e.g., 'my-workspace'). "
+        "Required when using OAuth; for API-token auth this can also be set in credentials.",
+    )
+    repo_slug: str = Field(
+        default="",
+        title="Repository Slug",
+        description="Specific repository to sync (e.g., 'my-repo'). "
+        "If empty, syncs all repositories in the workspace.",
+    )
+    branch: str = Field(
+        default="",
+        title="Branch name",
+        description=(
+            "Specific branch to sync (e.g., 'main', 'develop'). If empty, uses the default branch."
+        ),
+    )
+    file_extensions: list[str] = Field(
+        default=[],
+        title="File Extensions",
+        description=(
+            "List of file extensions to include (e.g., '.py', '.js', '.md'). "
+            "If empty, includes all text files."
+        ),
+    )
+
+    @field_validator("file_extensions", mode="before")
+    @classmethod
+    def parse_file_extensions(cls, value):
+        """Convert string input to list if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            # Split by commas and strip whitespace
+            return [ext.strip() for ext in value.split(",") if ext.strip()]
+        return value
+
+
+class BoxConfig(SourceConfig):
+    """Box configuration schema."""
+
+    folder_id: str = Field(
+        default="0",
+        title="Folder ID",
+        description=(
+            "Specific Box folder ID to sync. Default is '0' (root folder, syncs all files). "
+            "To sync a specific folder, enter its folder ID. "
+            "You can find folder IDs in the Box URL when viewing a folder."
+        ),
+    )
+
+
+class ClickUpConfig(SourceConfig):
+    """ClickUp configuration schema."""
+
+    pass
+
+
+class CodaConfig(SourceConfig):
+    """Coda configuration schema."""
+
+    doc_id: Optional[str] = Field(
+        default=None,
+        title="Doc ID",
+        description="Sync only this doc (leave empty to sync all docs the token can access).",
+    )
+    folder_id: Optional[str] = Field(
+        default=None,
+        title="Folder ID",
+        description="Limit docs to this folder (optional).",
+    )
+
+
+class ConfluenceConfig(SourceConfig):
+    """Confluence configuration schema."""
+
+    space_key: str = Field(
+        default="",
+        title="Space Key",
+        description=(
+            "Confluence space key to sync (e.g., 'ENG', 'MARKETING'). "
+            "If empty, all accessible spaces are synced."
+        ),
+    )
+    page_id: str = Field(
+        default="",
+        title="Page ID",
+        description=(
+            "Specific page ID to sync (and its children). "
+            "If empty, all pages in the space are synced. Requires Space Key to be set."
+        ),
+    )
+
+
+class DropboxConfig(SourceConfig):
+    """Dropbox configuration schema."""
+
+    include_path: str = Field(
+        default="",
+        title="Include Path",
+        description=(
+            "Dropbox folder path to sync (e.g., '/team/projects'). "
+            "If empty, all files are synced from the root."
+        ),
+    )
+    exclude_path: str = Field(
+        default="",
+        title="Exclude Path",
+        description=(
+            "Path prefix to exclude from sync (e.g., '/archive'). If empty, nothing is excluded."
+        ),
+    )
+
+
+class FirefliesConfig(SourceConfig):
+    """Fireflies configuration schema.
+
+    Syncs meeting transcripts (mine: true) from the Fireflies GraphQL API.
+    No additional config required for basic sync.
+    """
+
+
+class Document360Config(SourceConfig):
+    """Document360 configuration schema."""
+
+    base_url: Optional[str] = Field(
+        default=None,
+        title="API Base URL",
+        description=(
+            "Document360 API base URL (e.g. https://apihub.document360.io or "
+            "https://apihub.us.document360.io for US). Leave empty to use default."
+        ),
+    )
+    lang_code: str = Field(
+        default="en",
+        title="Language Code",
+        description="Language code for article content (e.g. 'en', 'es'). Default: en.",
+    )
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url_ssrf(cls, v: Optional[str]) -> Optional[str]:
+        """Validate base URL is not targeting internal resources."""
+        if v is not None:
+            validate_url(v)
+        return v
+
+
+class ElasticsearchConfig(SourceConfig):
+    """Elasticsearch configuration schema."""
+
+    pass
+
+
+class GitHubConfig(SourceConfig):
+    """Github configuration schema."""
+
+    repo_name: str = Field(
+        title="Repository Name",
+        description="Repository to sync in owner/repo format (e.g., 'connector-context/connector-context')",
+        min_length=3,
+        pattern=r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$",
+    )
+    branch: str = Field(
+        default="",
+        title="Branch name",
+        description=(
+            "Specific branch to sync (e.g., 'main', 'development'). "
+            "If empty, uses the default branch."
+        ),
+    )
+    sync_pull_requests: bool = Field(
+        default=False,
+        title="Sync Pull Requests",
+        description=(
+            "Sync merged pull requests and their review comments. "
+            "Enables searching over PR descriptions, discussions, and code review feedback."
+        ),
+    )
+    path_filter: str = Field(
+        default="",
+        title="Path Filter",
+        description=(
+            "Limit sync to files under this path prefix (e.g., 'src/backend'). "
+            "If empty, all files in the repository are synced."
+        ),
+    )
+
+    @field_validator("repo_name")
+    @classmethod
+    def validate_repo_name(cls, v: str) -> str:
+        """Validate repository name is in owner/repo format."""
+        if not v or not v.strip():
+            raise ValueError("Repository name is required")
+        v = v.strip()
+        if "/" not in v:
+            raise ValueError(
+                "Repository must be in 'owner/repo' format (e.g., 'connector-context/connector-context')"
+            )
+        parts = v.split("/")
+        if len(parts) != 2:
+            raise ValueError(
+                "Repository must be in 'owner/repo' format (e.g., 'connector-context/connector-context')"
+            )
+        owner, repo = parts
+        if not owner or not repo:
+            raise ValueError("Both owner and repository name must be non-empty")
+        return v
+
+
+class GitLabConfig(SourceConfig):
+    """GitLab configuration schema."""
+
+    project_id: str = Field(
+        default="",
+        title="Project ID",
+        description=(
+            "Specific project ID to sync (e.g., '12345'). If empty, syncs all accessible projects."
+        ),
+    )
+    project_path: str = Field(
+        default="",
+        title="Project Path",
+        description=(
+            "Project namespace/path (e.g., 'owner/repo'). "
+            "Used to look up the numeric project ID when a URL is provided as scope."
+        ),
+    )
+    branch: str = Field(
+        default="",
+        title="Branch name",
+        description=(
+            "Specific branch to sync (e.g., 'main', 'master'). If empty, uses the default branch."
+        ),
+    )
+
+
+class GmailConfig(SourceConfig):
+    """Gmail configuration schema."""
+
+    after_date: Optional[str] = Field(
+        None,
+        title="After Date",
+        description="Sync emails after this date (format: YYYY/MM/DD or YYYY-MM-DD).",
+    )
+
+    included_labels: list[str] = Field(
+        default=["inbox", "sent"],
+        title="Included Labels",
+        description=(
+            "Labels to include (e.g., 'inbox', 'sent', 'important'). Defaults to inbox and sent."
+        ),
+    )
+
+    excluded_labels: list[str] = Field(
+        default=[
+            "spam",
+            "trash",
+        ],
+        title="Excluded Labels",
+        description=(
+            "Labels to exclude (e.g., 'spam', 'trash', 'promotions', 'social'). "
+            "Defaults to spam and trash."
+        ),
+    )
+
+    excluded_categories: list[str] = Field(
+        default=["promotions", "social"],
+        title="Excluded Categories",
+        description=(
+            "Gmail categories to exclude (e.g., 'promotions', 'social', 'updates', 'forums')."
+        ),
+    )
+
+    gmail_query: Optional[str] = Field(
+        None,
+        title="Custom Gmail Query",
+        description=(
+            "Advanced. Custom Gmail query string (overrides all other filters if provided)."
+        ),
+    )
+
+    @field_validator("included_labels", "excluded_labels", "excluded_categories", mode="before")
+    @classmethod
+    def parse_list_fields(cls, value):
+        """Convert comma-separated string to list if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("after_date")
+    @classmethod
+    def validate_date_format(cls, value):
+        """Validate date format and convert to YYYY/MM/DD."""
+        if not value:
+            return value
+        # Accept both YYYY/MM/DD and YYYY-MM-DD formats
+        return value.replace("-", "/")
+
+
+class GoogleCalendarConfig(SourceConfig):
+    """Google Calendar configuration schema."""
+
+    pass
+
+
+class GoogleDocsConfig(SourceConfig):
+    """Google Docs configuration schema."""
+
+    folder_id: str = Field(
+        default="",
+        title="Folder ID",
+        description=(
+            "Google Drive folder ID to limit sync scope. "
+            "Only documents within this folder (and subfolders) will be synced. "
+            "Find the ID in the folder's URL: drive.google.com/drive/folders/<ID>"
+        ),
+    )
+    document_id: str = Field(
+        default="",
+        title="Document ID",
+        description=(
+            "Sync only this specific Google Doc. "
+            "Find the ID in the document URL: docs.google.com/document/d/<ID>"
+        ),
+    )
+    include_trashed: bool = Field(
+        default=False,
+        title="Include Trashed Documents",
+        description="Include documents that have been moved to trash. Defaults to False.",
+    )
+
+    include_shared: bool = Field(
+        default=True,
+        title="Include Shared Documents",
+        description="Include documents shared with you by others. Defaults to True.",
+    )
+
+
+class GoogleDriveConfig(SourceConfig):
+    """Google Drive configuration schema."""
+
+    folder_id: str = Field(
+        default="",
+        title="Folder ID",
+        description=(
+            "Google Drive folder ID to limit sync scope. "
+            "Only files within this folder (and subfolders) will be synced. "
+            "Find the ID in the folder's URL: drive.google.com/drive/folders/<ID>"
+        ),
+    )
+    include_patterns: list[str] = Field(
+        default=[],
+        title="Include Patterns",
+        description=(
+            "List of file/folder paths to include in synchronization. "
+            "Examples: 'my_folder/*', 'my_folder/my_file.pdf'. "
+            "Separate multiple patterns with commas. If empty, all files are included."
+        ),
+    )
+
+    @field_validator("include_patterns", mode="before")
+    @classmethod
+    def _parse_include_patterns(cls, value):
+        if isinstance(value, str):
+            return [p.strip() for p in value.split(",") if p.strip()]
+        return value
+
+
+class GoogleSlidesConfig(SourceConfig):
+    """Google Slides configuration schema."""
+
+    folder_id: str = Field(
+        default="",
+        title="Folder ID",
+        description=(
+            "Google Drive folder ID to limit sync scope. "
+            "Only presentations within this folder (and subfolders) will be synced. "
+            "Find the ID in the folder's URL: drive.google.com/drive/folders/<ID>"
+        ),
+    )
+    document_id: str = Field(
+        default="",
+        title="Presentation ID",
+        description=(
+            "Sync only this specific Google Slides presentation. "
+            "Find the ID in the presentation URL: docs.google.com/presentation/d/<ID>"
+        ),
+    )
+    include_trashed: bool = Field(
+        default=False,
+        title="Include Trashed Presentations",
+        description="Include presentations that have been moved to trash. Defaults to False.",
+    )
+
+    include_shared: bool = Field(
+        default=True,
+        title="Include Shared Presentations",
+        description="Include presentations shared with you by others. Defaults to True.",
+    )
+
+
+class HubspotConfig(SourceConfig):
+    """Hubspot configuration schema."""
+
+    after_date: Optional[str] = Field(
+        default=None,
+        title="After Date",
+        description=(
+            "Only sync records created or modified after this date in UTC "
+            "(format: YYYY-MM-DD). "
+            "Useful for large CRM instances where you only need recent data."
+        ),
+    )
+
+    @field_validator("after_date")
+    @classmethod
+    def validate_after_date(cls, value: Optional[str]) -> Optional[str]:
+        """Validate and normalize date format."""
+        if not value:
+            return value
+        value = value.replace("/", "-")
+        datetime.fromisoformat(value)
+        return value
+
+
+class SliteConfig(SourceConfig):
+    """Slite configuration schema."""
+
+    include_archived: bool = Field(
+        default=False,
+        title="Include archived notes",
+        description="If enabled, archived notes will be synced. Default: only active notes.",
+    )
+
+
+class JiraConfig(SourceConfig):
+    """Jira configuration schema."""
+
+    project_keys: list[str] = Field(
+        ...,
+        title="Project Keys",
+        description=(
+            "List of Jira project keys to sync (e.g., 'PROJ', 'DEV', 'MARKET'). "
+            "Only the specified projects will be synced. Hit enter to add new project. "
+            " You can find project keys in your Jira project settings."
+        ),
+        min_length=1,
+    )
+
+    # Zephyr Scale integration (requires ZEPHYR_SCALE feature flag)
+    # This field is dynamically shown/hidden based on organization feature flags
+    zephyr_scale_api_token: Optional[str] = Field(
+        default=None,
+        title="Zephyr Scale API Token",
+        description=(
+            "API token for Zephyr Scale test management integration. "
+            "Leave empty if not using Zephyr Scale."
+        ),
+        json_schema_extra={"feature_flag": "zephyr_scale", "is_secret": True},
+    )
+
+
+class LinearConfig(SourceConfig):
+    """Linear configuration schema."""
+
+    pass
+
+
+class MondayConfig(SourceConfig):
+    """Monday configuration schema."""
+
+    pass
+
+
+class MySQLConfig(SourceConfig):
+    """MySQL configuration schema."""
+
+    pass
+
+
+class NotionConfig(SourceConfig):
+    """Notion configuration schema."""
+
+    root_page_id: str = Field(
+        default="",
+        title="Root Page ID",
+        description=(
+            "Notion page ID to use as the sync root. Only this page and its children "
+            "will be synced. Find the ID in the page URL: notion.so/...-<ID>. "
+            "If empty, all accessible pages and databases are synced."
+        ),
+    )
+
+
+class OneDriveConfig(SourceConfig):
+    """OneDrive configuration schema."""
+
+    folder_path: str = Field(
+        default="",
+        title="Folder Path",
+        description=(
+            "Folder path to limit sync scope (e.g., 'Documents/Projects'). "
+            "If empty, all files in OneDrive are synced."
+        ),
+    )
+
+
+class OracleConfig(SourceConfig):
+    """Oracle configuration schema."""
+
+    pass
+
+
+class OutlookCalendarConfig(SourceConfig):
+    """Outlook Calendar configuration schema."""
+
+    pass
+
+
+class OutlookMailConfig(SourceConfig):
+    """Outlook Mail configuration schema."""
+
+    after_date: Optional[str] = Field(
+        None,
+        title="After Date",
+        description="Sync emails after this date (format: YYYY/MM/DD or YYYY-MM-DD).",
+    )
+
+    included_folders: list[str] = Field(
+        default=["inbox", "sentitems"],
+        title="Included Folders",
+        description=(
+            "Well-known folder names to include (e.g., 'inbox', 'sentitems', 'drafts'). "
+            "Defaults to inbox and sent items."
+        ),
+    )
+
+    excluded_folders: list[str] = Field(
+        default=["junkemail", "deleteditems"],
+        title="Excluded Folders",
+        description=(
+            "Well-known folder names to exclude (e.g., 'junkemail', 'deleteditems'). "
+            "Defaults to junk email and deleted items."
+        ),
+    )
+
+    @field_validator("included_folders", "excluded_folders", mode="before")
+    @classmethod
+    def parse_list_fields(cls, value):
+        """Convert comma-separated string to list if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("after_date")
+    @classmethod
+    def validate_date_format(cls, value):
+        """Validate date format and convert to YYYY/MM/DD."""
+        if not value:
+            return value
+        # Accept both YYYY/MM/DD and YYYY-MM-DD formats
+        return value.replace("-", "/")
+
+
+class OneNoteConfig(SourceConfig):
+    """Microsoft OneNote configuration schema."""
+
+    pass
+
+
+class WordConfig(SourceConfig):
+    """Microsoft Word configuration schema."""
+
+    pass
+
+
+class PowerPointConfig(SourceConfig):
+    """Microsoft PowerPoint configuration schema."""
+
+    pass
+
+
+class CTTIConfig(SourceConfig):
+    """CTTI AACT configuration schema."""
+
+    limit: int = Field(
+        default=10000,
+        title="Study Limit",
+        description="Maximum number of clinical trial studies to fetch from AACT database",
+    )
+
+    skip: int = Field(
+        default=0,
+        title="Skip Studies",
+        description=(
+            "Number of clinical trial studies to skip (for pagination). "
+            "Use with limit to fetch different batches."
+        ),
+    )
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def parse_limit(cls, value):
+        """Convert string input to integer if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return 10000
+            try:
+                return int(value.strip())
+            except ValueError as e:
+                raise ValueError("Limit must be a valid integer") from e
+        return value
+
+    @field_validator("skip", mode="before")
+    @classmethod
+    def parse_skip(cls, value):
+        """Convert string input to integer if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return 0
+            try:
+                skip_val = int(value.strip())
+                if skip_val < 0:
+                    raise ValueError("Skip must be non-negative")
+                return skip_val
+            except ValueError as e:
+                if "non-negative" in str(e):
+                    raise e
+                raise ValueError("Skip must be a valid integer") from e
+        if isinstance(value, (int, float)):
+            if value < 0:
+                raise ValueError("Skip must be non-negative")
+            return int(value)
+        return value
+
+
+class SharePointConfig(SourceConfig):
+    """SharePoint configuration schema."""
+
+    site_url: str = Field(
+        default="",
+        title="SharePoint Site URL",
+        description=(
+            "URL of a specific SharePoint site to sync "
+            "(e.g., 'https://contoso.sharepoint.com/sites/Marketing'). "
+            "Leave empty to sync the root site."
+        ),
+    )
+
+    drive_name: str = Field(
+        default="",
+        title="Document Library Name",
+        description=(
+            "Name of a specific document library to sync within the site "
+            "(e.g., 'Documents'). Leave empty to sync all document libraries."
+        ),
+    )
+
+
+class SharePoint2019V2Config(SourceConfig):
+    """SharePoint 2019 On-Premise configuration schema.
+
+    Requires both SharePoint site URL and Active Directory server configuration.
+    AD is needed to resolve SIDs to sAMAccountNames for access control.
+    """
+
+    site_url: str = RequiredTemplateConfig(
+        title="SharePoint Site URL",
+        description=(
+            "Full URL of the SharePoint site to sync "
+            "(e.g., 'https://sharepoint.contoso.com/sites/Marketing')"
+        ),
+        json_schema_extra={"required_for_auth": True},
+    )
+
+    @field_validator("site_url")
+    @classmethod
+    def validate_site_url_ssrf(cls, v: str) -> str:
+        """Validate site URL is not targeting internal resources."""
+        return validate_url(v)
+
+    # Active Directory config (required for SID resolution)
+    ad_server: str = Field(
+        title="Active Directory Server",
+        description=(
+            "LDAP server hostname or IP address for Active Directory queries "
+            "(e.g., 'dc.contoso.local' or 'ldaps://dc.contoso.local:636')"
+        ),
+    )
+
+    ad_search_base: str = Field(
+        title="AD Search Base DN",
+        description=(
+            "LDAP search base Distinguished Name for Active Directory queries "
+            "(e.g., 'DC=contoso,DC=local')"
+        ),
+    )
+
+
+class ShopifyConfig(SourceConfig):
+    """Shopify configuration schema."""
+
+    shop_domain: str = Field(
+        title="Shop Domain",
+        description="Your Shopify store domain (e.g., 'my-store.myshopify.com')",
+        min_length=3,
+    )
+
+    @field_validator("shop_domain")
+    @classmethod
+    def validate_shop_domain_ssrf(cls, v: str) -> str:
+        """Validate shop domain is not targeting internal resources."""
+        return validate_host(v)
+
+
+class SlabConfig(SourceConfig):
+    """Slab configuration schema."""
+
+    host: str = Field(
+        default="app.slab.com",
+        title="Slab host",
+        description=(
+            "Your Slab workspace host (e.g. 'myteam.slab.com'). "
+            "Find it in your Slab URL when logged in. Required by the Slab API. "
+            "Default: app.slab.com"
+        ),
+        min_length=1,
+    )
+
+    @field_validator("host")
+    @classmethod
+    def validate_host_ssrf(cls, v: str) -> str:
+        """Validate host is not targeting internal resources."""
+        return validate_host(v)
+
+
+class SlackConfig(SourceConfig):
+    """Slack configuration schema."""
+
+    channel_ids: list[str] = Field(
+        default=[],
+        title="Channel IDs",
+        description=(
+            "Specific Slack channel IDs to search (e.g., 'C01234ABCDE'). "
+            "If empty, searches all accessible channels."
+        ),
+    )
+    channel_names: list[str] = Field(
+        default=[],
+        title="Channel Names",
+        description=(
+            "Specific Slack channel names to search (e.g., 'general', 'engineering'). "
+            "If empty, searches all accessible channels."
+        ),
+    )
+
+    @field_validator("channel_ids", "channel_names", mode="before")
+    @classmethod
+    def parse_channel_list(cls, value):
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [c.strip().lstrip("#") for c in value.split(",") if c.strip()]
+        return value
+
+
+class SQLServerConfig(SourceConfig):
+    """SQL Server configuration schema."""
+
+    pass
+
+
+class SQliteConfig(SourceConfig):
+    """SQlite configuration schema."""
+
+    pass
+
+
+class StripeConfig(SourceConfig):
+    """Stripe configuration schema."""
+
+    pass
+
+
+class PipedriveConfig(SourceConfig):
+    """Pipedrive configuration schema."""
+
+    pass
+
+
+class SalesforceConfig(SourceConfig):
+    """Salesforce configuration schema.
+
+    Note: instance_url is automatically extracted from the OAuth response
+    or from the auth provider's credential blob, so users don't need to
+    provide it manually.
+    """
+
+    object_types: list[str] = Field(
+        default=[],
+        title="Object Types",
+        description=(
+            "Salesforce object types to sync (e.g., 'Account', 'Contact', 'Opportunity'). "
+            "If empty, all supported object types are synced."
+        ),
+    )
+
+    @field_validator("object_types", mode="before")
+    @classmethod
+    def parse_object_types(cls, value):
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [o.strip() for o in value.split(",") if o.strip()]
+        return value
+
+    instance_url: Optional[str] = Field(
+        default=None,
+        title="Salesforce Instance URL",
+        description="Your Salesforce instance domain (auto-populated from OAuth response)",
+        json_schema_extra={
+            "exclude_from_ui": True,
+            "auth_provider_field": "instance_url",
+        },
+    )
+
+    api_version: str = Field(
+        default="58.0",
+        title="API Version",
+        description="Salesforce API version to use (e.g., '58.0').",
+        json_schema_extra={"exclude_from_ui": True},
+    )
+
+    @field_validator("instance_url", mode="before")
+    @classmethod
+    def strip_https_prefix(cls, value):
+        """Remove https:// or http:// prefix if present."""
+        if isinstance(value, str):
+            if value.startswith("https://"):
+                value = value.replace("https://", "", 1)
+            elif value.startswith("http://"):
+                value = value.replace("http://", "", 1)
+            if value:
+                validate_host(value)
+        return value
+
+
+class TodoistConfig(SourceConfig):
+    """Todoist configuration schema."""
+
+    pass
+
+
+class TimedConfig(SourceConfig):
+    """Timed source configuration schema for testing sync lifecycle.
+
+    Controls the generation of N entities spread evenly over a configurable
+    duration. Designed for precise timing control in cancellation and
+    state transition tests.
+    """
+
+    entity_count: int = Field(
+        default=100,
+        title="Entity Count",
+        description="Total number of entities to generate",
+        ge=1,
+        le=10000,
+    )
+    duration_seconds: float = Field(
+        default=10.0,
+        title="Duration (seconds)",
+        description="Total time to spread entity generation over, in seconds",
+        ge=0.1,
+        le=600,
+    )
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+
+
+class StubConfig(SourceConfig):
+    """Stub source configuration schema for testing.
+
+    Configures the generation of deterministic test entities with various
+    content sizes and types. Uses weighted distribution for entity type selection.
+    """
+
+    entity_count: int = Field(
+        default=10,
+        title="Entity Count",
+        description="Total number of entities to generate",
+        ge=1,
+        le=100000,
+    )
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+    generation_delay_ms: int = Field(
+        default=0,
+        title="Generation Delay (ms)",
+        description="Delay between entity generations in milliseconds (0 for no delay)",
+        ge=0,
+        le=10000,
+    )
+
+    # Distribution weights (will be normalized to sum to 100)
+    small_entity_weight: int = Field(
+        default=30,
+        title="Small Entity Weight",
+        description="Weight for small entities (~100-200 chars, like comments)",
+        ge=0,
+        le=100,
+    )
+    medium_entity_weight: int = Field(
+        default=30,
+        title="Medium Entity Weight",
+        description="Weight for medium entities (~500-1000 chars, like tasks)",
+        ge=0,
+        le=100,
+    )
+    large_entity_weight: int = Field(
+        default=10,
+        title="Large Entity Weight",
+        description="Weight for large entities (~3000-5000 chars, like articles)",
+        ge=0,
+        le=100,
+    )
+    small_file_weight: int = Field(
+        default=15,
+        title="Small File Weight",
+        description="Weight for small file entities (~1-5 KB)",
+        ge=0,
+        le=100,
+    )
+    large_file_weight: int = Field(
+        default=5,
+        title="Large File Weight",
+        description="Weight for large file entities (~50-100 KB)",
+        ge=0,
+        le=100,
+    )
+    code_file_weight: int = Field(
+        default=10,
+        title="Code File Weight",
+        description="Weight for code file entities (~2-10 KB)",
+        ge=0,
+        le=100,
+    )
+    inject_special_tokens: bool = Field(
+        default=False,
+        title="Inject Special Tokens",
+        description=(
+            "If true, injects special tokenizer tokens (like <|endoftext|>) into generated "
+            "content. Used for testing chunker/embedder handling of edge cases."
+        ),
+    )
+
+    custom_content_prefix: Optional[str] = Field(
+        default=None,
+        title="Custom Content Prefix",
+        description=(
+            "Optional string to prepend to all generated content. Useful for testing "
+            "specific strings like special tokens or edge case characters."
+        ),
+    )
+
+    fail_after: int = Field(
+        default=-1,
+        title="Fail After",
+        description="Number of entities to generate before failing the sync (-1 to disable)",
+        ge=-1,
+        le=100000,
+    )
+
+    @field_validator(
+        "small_entity_weight",
+        "medium_entity_weight",
+        "large_entity_weight",
+        "small_file_weight",
+        "large_file_weight",
+        "code_file_weight",
+        mode="before",
+    )
+    @classmethod
+    def parse_weight(cls, value):
+        """Convert string input to integer if needed."""
+        if isinstance(value, str):
+            if not value.strip():
+                return 0
+            try:
+                return int(value.strip())
+            except ValueError as e:
+                raise ValueError("Weight must be a valid integer") from e
+        return value
+
+
+class IncrementalStubConfig(SourceConfig):
+    """Incremental stub source configuration for testing continuous sync.
+
+    Generates deterministic entities with cursor-based incremental support.
+    The source tracks which entities have been synced and only yields new
+    ones on subsequent syncs. The entity_count can be increased between
+    syncs to simulate new data appearing.
+    """
+
+    entity_count: int = Field(
+        default=5,
+        title="Entity Count",
+        description="Total number of entities available. Increase between syncs to add new data.",
+        ge=1,
+        le=100000,
+    )
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+
+
+class FileStubConfig(SourceConfig):
+    """File stub source configuration for testing file converters.
+
+    Generates one of each file type: born-digital PDF, scanned PDF, PPTX, DOCX.
+    """
+
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+    custom_content_prefix: Optional[str] = Field(
+        default=None,
+        title="Custom Content Prefix",
+        description=(
+            "Optional string to embed in all generated files. "
+            "Useful as a tracking token for search assertions."
+        ),
+    )
+
+
+ExceptionType = Literal[
+    "runtime_error",
+    "source_auth_error",
+    "source_token_refresh_error",
+    "source_server_error",
+    "source_rate_limit_error",
+    "source_entity_not_found",
+    "source_entity_forbidden",
+    "token_expired",
+    "token_credentials_invalid",
+    "token_provider_config_error",
+    "token_provider_server_error",
+    "timeout",
+    "cancelled",
+]
+
+AuthProviderKindType = Literal[
+    "oauth",
+    "static",
+    "auth_provider",
+    "credential",
+]
+
+
+class ExceptionStubConfig(SourceConfig):
+    """Exception stub source configuration for testing error handling.
+
+    Configures which exception to raise and when, so you can test
+    how the UI responds to different error scenarios during sync.
+    """
+
+    entity_count: int = Field(
+        default=10,
+        title="Entity Count",
+        description="Total number of entities to generate before/instead of failing",
+        ge=1,
+        le=1000,
+    )
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+    exception_type: ExceptionType = Field(
+        default="runtime_error",
+        title="Exception Type",
+        description="Which exception to raise during entity generation",
+    )
+    auth_provider_kind: AuthProviderKindType = Field(
+        default="oauth",
+        title="Auth Provider Kind",
+        description=(
+            "Provider kind for auth-related exceptions "
+            "(source_auth_error, source_token_refresh_error, token_* errors)"
+        ),
+    )
+    trigger_after: int = Field(
+        default=5,
+        title="Trigger After N Entities",
+        description=(
+            "Raise exception after yielding this many entities. "
+            "0 = immediately after container. "
+            "-1 = after the last entity. "
+            "If >= entity_count, no exception is raised (baseline test)."
+        ),
+        ge=-1,
+    )
+    error_message: Optional[str] = Field(
+        default=None,
+        title="Custom Error Message",
+        description="Custom error message. If empty, a descriptive default is generated.",
+    )
+    fail_on_validate: bool = Field(
+        default=False,
+        title="Fail on Validate",
+        description=(
+            "If true, validate() raises the configured exception_type before sync starts."
+        ),
+    )
+
+
+class TrelloConfig(SourceConfig):
+    """Trello configuration schema."""
+
+    pass
+
+
+class TeamsConfig(SourceConfig):
+    """Microsoft Teams configuration schema."""
+
+    channel_names: list[str] = Field(
+        default=[],
+        title="Channel Names",
+        description=(
+            "Specific Teams channel names to sync (e.g., 'General', 'Engineering'). "
+            "If empty, all channels in all teams are synced."
+        ),
+    )
+
+    @field_validator("channel_names", mode="before")
+    @classmethod
+    def parse_channel_names(cls, value):
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [c.strip() for c in value.split(",") if c.strip()]
+        return value
+
+
+class ZendeskConfig(SourceConfig):
+    """Zendesk configuration schema."""
+
+    subdomain: str = RequiredTemplateConfig(
+        title="Zendesk Subdomain",
+        description="Your Zendesk subdomain only (e.g., 'mycompany' NOT 'mycompany.zendesk.com')",
+        json_schema_extra={"required_for_auth": True},
+    )
+    exclude_closed_tickets: Optional[bool] = Field(
+        default=False,
+        title="Exclude Closed Tickets",
+        description="Skip closed tickets during sync (recommended for faster syncing)",
+    )
+
+
+class FreshdeskConfig(SourceConfig):
+    """Freshdesk configuration schema."""
+
+    domain: str = RequiredTemplateConfig(
+        title="Freshdesk Domain",
+        description=("Your Freshdesk domain only (e.g., 'mycompany' for mycompany.freshdesk.com)"),
+        json_schema_extra={"required_for_auth": True},
+    )
+
+
+class IntercomConfig(SourceConfig):
+    """Intercom configuration schema."""
+
+    exclude_closed_conversations: Optional[bool] = Field(
+        default=False,
+        title="Exclude Closed Conversations",
+        description="Skip closed conversations during sync (recommended for faster syncing)",
+    )
+
+
+class ServiceNowConfig(SourceConfig):
+    """ServiceNow configuration schema."""
+
+    pass
+
+
+class CalComConfig(SourceConfig):
+    """Cal.com configuration schema.
+
+    Supports self-hosted Cal.com instances by allowing a custom host/base URL.
+    """
+
+    host: str = Field(
+        default="https://api.cal.com",
+        title="Host",
+        description=(
+            "Base URL for your Cal.com instance. Use the default for cal.com cloud "
+            "(https://api.cal.com). For self-hosted instances, set this to your API host "
+            "(e.g. https://cal.example.com or https://cal.example.com/api if exposed there)."
+        ),
+    )
+
+    @field_validator("host", mode="before")
+    @classmethod
+    def normalize_host(cls, v: str) -> str:
+        """Normalize host to a valid base URL (add scheme, strip trailing slash)."""
+        if v is None:
+            return "https://api.cal.com"
+        if not isinstance(v, str):
+            raise ValueError("host must be a string")
+        value = v.strip()
+        if not value:
+            return "https://api.cal.com"
+        # Allow providing host without scheme (e.g. cal.example.com)
+        if not value.startswith(("http://", "https://")):
+            value = f"https://{value}"
+        # Remove trailing slash for consistent URL joining
+        value = value.rstrip("/")
+        validate_url(value)
+        return value
+
+
+# AUTH PROVIDER CONFIGURATION CLASSES
+# These are for configuring auth provider behavior
+
+
+class AuthProviderConfig(BaseConfig):
+    """Base auth provider configuration schema."""
+
+    pass
+
+
+class ComposioConfig(AuthProviderConfig):
+    """Composio Auth Provider configuration schema."""
+
+    auth_config_id: str = Field(
+        title="Auth Config ID",
+        description="Auth Config ID for the Composio connection",
+    )
+    account_id: str = Field(
+        title="Account ID",
+        description="Account ID for the Composio connection",
+    )
+
+
+class CustomConfig(AuthProviderConfig):
+    """Custom Auth Provider configuration schema."""
+
+    pass
+
+
+class PipedreamConfig(AuthProviderConfig):
+    """Pipedream Auth Provider configuration schema."""
+
+    project_id: str = Field(
+        title="Project ID",
+        description="Pipedream project ID (e.g., proj_JPsD74a)",
+    )
+    account_id: str = Field(
+        title="Account ID",
+        description="Pipedream account ID (e.g., apn_gyha5Ky)",
+    )
+    external_user_id: str = Field(
+        title="External User ID",
+        description="External user ID associated with the account",
+    )
+    environment: str = Field(
+        default="production",
+        title="Environment",
+        description="Pipedream environment (production or development)",
+    )
+
+
+class SnapshotConfig(BaseConfig):
+    """Configuration for SnapshotSource.
+
+    Specifies the path to raw data captured during a previous sync.
+    Supports both local filesystem paths and Azure blob URLs.
+    """
+
+    path: str = Field(
+        title="Raw Data Path",
+        description=(
+            "Path to the raw data directory containing manifest.json, entities/, and files/. "
+            "Can be a local filesystem path (e.g., '/path/to/raw/sync-id') or "
+            "Azure blob URL (e.g., 'https://account.blob.core.windows.net/container/raw/sync-id')"
+        ),
+        min_length=1,
+    )
+
+    restore_files: bool = Field(
+        default=True,
+        title="Restore Files",
+        description="Whether to restore file attachments from the files/ directory",
+    )
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        """Validate and normalize path."""
+        if not v or not v.strip():
+            raise ValueError("Path is required")
+        return v.strip().rstrip("/")
+
+
+class SharePointOnlineConfig(SourceConfig):
+    """SharePoint Online configuration schema.
+
+    Configures which SharePoint sites to sync and ACL behavior.
+    """
+
+    site_url: str = Field(
+        default="",
+        title="SharePoint Site URL",
+        description=(
+            "URL of a specific SharePoint site to sync "
+            "(e.g., 'https://contoso.sharepoint.com/sites/Marketing'). "
+            "Leave empty to sync all sites in the tenant."
+        ),
+    )
+
+    @field_validator("site_url")
+    @classmethod
+    def validate_site_url_ssrf(cls, v: str) -> str:
+        """Validate site URL for SSRF safety."""
+        if not v:
+            return v
+        validate_url(v.strip())
+        return v.strip()
+
+    include_personal_sites: bool = Field(
+        default=False,
+        title="Include Personal Sites",
+        description="Whether to include OneDrive personal sites in sync.",
+    )
+
+    drive_name: str = Field(
+        default="",
+        title="Document Library Name",
+        description=(
+            "Name of a specific document library (drive) to sync within the site "
+            "(e.g., 'ather'). Leave empty to sync all document libraries."
+        ),
+    )
+
+    include_pages: bool = Field(
+        default=True,
+        title="Include Site Pages",
+        description="Whether to sync SharePoint site pages.",
+    )
+
+
+class HerbConfig(SourceConfig):
+    """Configuration for HERB benchmark sources.
+
+    Points to the HERB /data directory containing product JSON files and metadata/.
+    """
+
+    data_dir: str = Field(
+        ...,
+        title="HERB Data Directory",
+        description="Path to the HERB /data directory (e.g. '/tmp/HERB/data')",
+        min_length=1,
+    )
+
+
+class EnronConfig(SourceConfig):
+    """Configuration for the Enron email dataset source.
+
+    Points to the root of a HuggingFace snapshot_download of corbt/enron-emails.
+    Expected structure: {data_dir}/data/*.parquet
+    """
+
+    data_dir: str = Field(
+        ...,
+        title="Enron Data Directory",
+        description=(
+            "Path to the downloaded Enron email dataset root (e.g. '/data/enron-emails-data')"
+        ),
+        min_length=1,
+    )

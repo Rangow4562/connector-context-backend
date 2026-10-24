@@ -1,0 +1,96 @@
+"""Search tool — query the vector database for relevant entities.
+
+Uses the shared SearchPlanExecutor to embed, compile, and execute.
+Returns summaries (via to_snippet_summary_md) — the context manager
+decides how many fit in the window.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context.api.context import ApiContext
+from connector_context.domains.search.agentic.state import AgentState
+from connector_context.domains.search.agentic.tools.dispatcher import Tool
+from connector_context.domains.search.agentic.tools.types import RenderedResult, SearchToolResult
+from connector_context.domains.search.protocols import SearchPlanExecutorProtocol
+from connector_context.domains.search.types import FilterGroup, SearchPlan
+
+SEARCH_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "search",
+        "description": (
+            "Search the collection for relevant entities. "
+            "Use different queries, expansions, retrieval strategies "
+            "(semantic, keyword, hybrid), limits and filters to refine results."
+        ),
+        "parameters": SearchPlan.model_json_schema(),
+    },
+}
+
+
+class SearchTool(Tool):
+    """Validates LLM args as a SearchPlan and executes via the shared executor."""
+
+    def __init__(
+        self,
+        executor: SearchPlanExecutorProtocol,
+        user_filter: list[FilterGroup],
+        collection_id: str,
+        db: AsyncSession,
+        ctx: ApiContext,
+        collection_readable_id: str,
+        user_principal: str | None = None,
+    ) -> None:
+        """Initialize with executor, user filter, collection ID, and request context."""
+        self._executor = executor
+        self._user_filter = user_filter
+        self._collection_id = collection_id
+        self._db = db
+        self._ctx = ctx
+        self._collection_readable_id = collection_readable_id
+        self._user_principal = user_principal
+
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+        state: AgentState,
+        tool_call_id: str = "",
+    ) -> SearchToolResult:
+        """Execute search. ValidationError on bad args is caught by dispatcher."""
+        plan = SearchPlan.model_validate(arguments)
+        results = await self._executor.execute(
+            plan=plan,
+            user_filter=self._user_filter,
+            collection_id=self._collection_id,
+            db=self._db,
+            ctx=self._ctx,
+            collection_readable_id=self._collection_readable_id,
+            user_principal=self._user_principal,
+        )
+
+        # Track new results in state
+        new_count = 0
+        for r in results.results:
+            if r.entity_id not in state.results:
+                state.results[r.entity_id] = r
+                new_count += 1
+
+        if tool_call_id:
+            state.results_by_tool_call_id[tool_call_id] = results.results
+
+        # Render as summaries
+        summaries = [
+            RenderedResult(entity_id=r.entity_id, text=r.to_snippet_summary_md())
+            for r in results.results
+        ]
+
+        return SearchToolResult(
+            summaries=summaries,
+            new_count=new_count,
+            requested_limit=plan.limit,
+            requested_offset=plan.offset,
+        )

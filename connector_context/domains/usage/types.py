@@ -1,0 +1,69 @@
+"""Usage domain types and pure business logic.
+
+Constants, enums, and pure functions used by the usage service, factory,
+and consumers. No IO — everything here is deterministic.
+"""
+
+from enum import Enum
+from typing import Optional
+
+from connector_context.domains.billing.types import get_plan_limits
+from connector_context.schemas.billing_period import BillingPeriodStatus
+from connector_context.schemas.organization_billing import BillingPlan
+from connector_context.schemas.usage import UsageLimit
+
+
+class ActionType(str, Enum):
+    """Action type enum."""
+
+    ENTITIES = "entities"
+    QUERIES = "queries"
+    TOKENS = "tokens"
+    SOURCE_CONNECTIONS = "source_connections"
+    TEAM_MEMBERS = "team_members"
+
+
+# Billing status restrictions — which action types are blocked for each status.
+BILLING_STATUS_RESTRICTIONS: dict[BillingPeriodStatus, set[ActionType]] = {
+    BillingPeriodStatus.ACTIVE: set(),
+    BillingPeriodStatus.TRIAL: set(),
+    BillingPeriodStatus.GRACE: {
+        ActionType.SOURCE_CONNECTIONS,
+    },
+    BillingPeriodStatus.ENDED_UNPAID: {
+        ActionType.ENTITIES,
+        ActionType.SOURCE_CONNECTIONS,
+    },
+    BillingPeriodStatus.COMPLETED: {
+        ActionType.ENTITIES,
+        ActionType.SOURCE_CONNECTIONS,
+        ActionType.QUERIES,
+        ActionType.TOKENS,
+    },
+}
+
+
+def normalize_tokens(
+    prompt_tokens: int,
+    completion_tokens: int,
+    input_price_factor: float = 1.0,
+    output_price_factor: float = 1.0,
+) -> int:
+    """Compute normalized token count from raw input/output tokens and model pricing."""
+    return int(prompt_tokens * input_price_factor + completion_tokens * output_price_factor)
+
+
+def infer_usage_limit(plan: Optional[BillingPlan] = None) -> UsageLimit:
+    """Build a UsageLimit from a billing plan.
+
+    Falls back to DEVELOPER limits when plan is None.
+    """
+    plan = plan or BillingPlan.DEVELOPER
+    limits = get_plan_limits(plan)
+    return UsageLimit(
+        max_entities=limits.get("max_entities"),
+        max_queries=limits.get("max_queries"),
+        max_tokens=limits.get("max_tokens"),
+        max_source_connections=limits.get("max_source_connections"),
+        max_team_members=limits.get("max_team_members"),
+    )

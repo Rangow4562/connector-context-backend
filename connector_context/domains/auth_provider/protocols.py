@@ -1,0 +1,76 @@
+from typing import Any, Optional, Protocol
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from connector_context import schemas
+from connector_context.api.context import ApiContext
+from connector_context.core.protocols.registry import RegistryProtocol
+from connector_context.domains.auth_provider.types import AuthProviderMetadata, AuthProviderRegistryEntry
+from connector_context.platform.configs._base import ConfigValues
+
+
+class AuthProviderRegistryProtocol(RegistryProtocol[AuthProviderRegistryEntry], Protocol):
+    """Auth provider registry protocol."""
+
+    def get_settings_url(self, short_name: str) -> str | None:
+        """Get settings dashboard URL for an auth provider."""
+        ...
+
+
+class AuthProviderServiceProtocol(Protocol):
+    """Service for auth provider connection operations."""
+
+    async def list_metadata(self, *, ctx: ApiContext) -> list[AuthProviderMetadata]:
+        """List auth provider metadata from registry."""
+        ...
+
+    async def get_metadata(self, *, short_name: str, ctx: ApiContext) -> AuthProviderMetadata:
+        """Get auth provider metadata from registry."""
+        ...
+
+    async def list_connections(
+        self, db: AsyncSession, *, ctx: ApiContext, skip: int = 0, limit: int = 100
+    ) -> list[schemas.AuthProviderConnection]:
+        """List auth provider connections for the current organization."""
+        ...
+
+    async def get_connection(
+        self, db: AsyncSession, *, readable_id: str, ctx: ApiContext
+    ) -> schemas.AuthProviderConnection:
+        """Get an auth provider connection."""
+        ...
+
+    async def create_connection(
+        self,
+        db: AsyncSession,
+        *,
+        obj_in: schemas.AuthProviderConnectionCreate,
+        ctx: ApiContext,
+    ) -> schemas.AuthProviderConnection:
+        """Create an auth provider connection."""
+        ...
+
+    async def update_connection(
+        self,
+        db: AsyncSession,
+        *,
+        readable_id: str,
+        obj_in: schemas.AuthProviderConnectionUpdate,
+        ctx: ApiContext,
+    ) -> schemas.AuthProviderConnection:
+        """Update an auth provider connection."""
+        ...
+
+    async def delete_connection(
+        self, db: AsyncSession, *, readable_id: str, ctx: ApiContext
+    ) -> schemas.AuthProviderConnection:
+        """Delete an auth provider connection."""
+        ...
+
+    def validate_provider_config(
+        self,
+        short_name: str,
+        provider_config: Optional[ConfigValues],
+    ) -> dict[str, Any]:
+        """Validate auth provider config against the provider's config class."""
+        ...

@@ -1,0 +1,582 @@
+"""Salesforce entity schemas.
+
+Based on the Salesforce REST API, we define entity schemas for
+the core Salesforce objects: Accounts, Contacts, and Opportunities.
+
+These schemas follow the same style as other connectors (e.g., Stripe, HubSpot),
+where each entity class inherits from BaseEntity and adds relevant fields with
+shared or per-resource metadata as needed.
+"""
+
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+from pydantic import computed_field
+
+from connector_context.platform.entities._connector_context_field import ConnectorContextField
+from connector_context.platform.entities._base import BaseEntity, Breadcrumb
+
+
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse Salesforce ISO datetimes into timezone-aware datetimes."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+class SalesforceAccountEntity(BaseEntity):
+    """Schema for Salesforce Account entities.
+
+    Reference:
+        https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_account.htm
+    """
+
+    account_id: str = ConnectorContextField(
+        ..., description="Unique Salesforce ID for the account.", is_entity_id=True
+    )
+    account_name: str = ConnectorContextField(
+        ..., description="Display name of the account.", embeddable=True, is_name=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="When the account was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="When the account was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to open the account in Salesforce.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    # API fields
+    account_number: Optional[str] = ConnectorContextField(
+        None, description="Account number", embeddable=True
+    )
+    website: Optional[str] = ConnectorContextField(
+        None, description="Account website URL", embeddable=False
+    )
+    phone: Optional[str] = ConnectorContextField(None, description="Account phone number", embeddable=True)
+    fax: Optional[str] = ConnectorContextField(None, description="Account fax number", embeddable=False)
+    industry: Optional[str] = ConnectorContextField(None, description="Account industry", embeddable=True)
+    annual_revenue: Optional[float] = ConnectorContextField(
+        None, description="Annual revenue", embeddable=False
+    )
+    number_of_employees: Optional[int] = ConnectorContextField(
+        None, description="Number of employees", embeddable=False
+    )
+    ownership: Optional[str] = ConnectorContextField(
+        None, description="Account ownership type", embeddable=True
+    )
+    ticker_symbol: Optional[str] = ConnectorContextField(
+        None, description="Stock ticker symbol", embeddable=False
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Account description", embeddable=True
+    )
+    rating: Optional[str] = ConnectorContextField(None, description="Account rating", embeddable=True)
+    parent_id: Optional[str] = ConnectorContextField(
+        None, description="ID of parent account", embeddable=False
+    )
+    type: Optional[str] = ConnectorContextField(None, description="Account type", embeddable=True)
+    billing_street: Optional[str] = ConnectorContextField(
+        None, description="Billing street address", embeddable=True
+    )
+    billing_city: Optional[str] = ConnectorContextField(None, description="Billing city", embeddable=True)
+    billing_state: Optional[str] = ConnectorContextField(
+        None, description="Billing state/province", embeddable=True
+    )
+    billing_postal_code: Optional[str] = ConnectorContextField(
+        None, description="Billing postal code", embeddable=False
+    )
+    billing_country: Optional[str] = ConnectorContextField(
+        None, description="Billing country", embeddable=True
+    )
+    shipping_street: Optional[str] = ConnectorContextField(
+        None, description="Shipping street address", embeddable=True
+    )
+    shipping_city: Optional[str] = ConnectorContextField(None, description="Shipping city", embeddable=True)
+    shipping_state: Optional[str] = ConnectorContextField(
+        None, description="Shipping state/province", embeddable=True
+    )
+    shipping_postal_code: Optional[str] = ConnectorContextField(
+        None, description="Shipping postal code", embeddable=False
+    )
+    shipping_country: Optional[str] = ConnectorContextField(
+        None, description="Shipping country", embeddable=True
+    )
+    last_activity_date: Optional[Any] = ConnectorContextField(
+        None, description="Date of the last activity on the account", embeddable=False
+    )
+    last_viewed_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when the account was last viewed", embeddable=False
+    )
+    last_referenced_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when the account was last referenced", embeddable=False
+    )
+    is_deleted: bool = ConnectorContextField(
+        False, description="Indicates whether the account has been deleted", embeddable=False
+    )
+    is_customer_portal: bool = ConnectorContextField(
+        False,
+        description="Indicates whether this account has customer portal access",
+        embeddable=False,
+    )
+    is_person_account: bool = ConnectorContextField(
+        False, description="Indicates whether this is a person account", embeddable=False
+    )
+    jigsaw: Optional[str] = ConnectorContextField(None, description="Data.com ID", embeddable=False)
+    clean_status: Optional[str] = ConnectorContextField(
+        None, description="Clean status from Data.com", embeddable=False
+    )
+    account_source: Optional[str] = ConnectorContextField(
+        None, description="Source of the account", embeddable=True
+    )
+    sic_desc: Optional[str] = ConnectorContextField(None, description="SIC description", embeddable=True)
+    duns_number: Optional[str] = ConnectorContextField(None, description="D-U-N-S number", embeddable=False)
+    tradestyle: Optional[str] = ConnectorContextField(None, description="Tradestyle", embeddable=True)
+    naics_code: Optional[str] = ConnectorContextField(None, description="NAICS code", embeddable=False)
+    naics_desc: Optional[str] = ConnectorContextField(
+        None, description="NAICS description", embeddable=True
+    )
+    year_started: Optional[str] = ConnectorContextField(
+        None, description="Year the account was started", embeddable=False
+    )
+    metadata: Dict[str, Any] = ConnectorContextField(
+        default_factory=dict,
+        description="Additional metadata about the account",
+        embeddable=False,
+    )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Browser URL for the account."""
+        return self.web_url_value or ""
+
+
+class SalesforceContactEntity(BaseEntity):
+    """Schema for Salesforce Contact entities.
+
+    Reference:
+        https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_contact.htm
+    """
+
+    contact_id: str = ConnectorContextField(
+        ..., description="Unique Salesforce ID for the contact.", is_entity_id=True
+    )
+    contact_name: str = ConnectorContextField(
+        ..., description="Display name of the contact.", embeddable=True, is_name=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="When the contact was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="When the contact was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view the contact in Salesforce.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    # API fields
+    first_name: Optional[str] = ConnectorContextField(
+        None, description="Contact's first name", embeddable=True
+    )
+    last_name: Optional[str] = ConnectorContextField(
+        None, description="Contact's last name", embeddable=True
+    )
+    email: Optional[str] = ConnectorContextField(
+        None, description="Contact's email address", embeddable=True
+    )
+    phone: Optional[str] = ConnectorContextField(
+        None, description="Contact's phone number", embeddable=True
+    )
+    mobile_phone: Optional[str] = ConnectorContextField(
+        None, description="Contact's mobile phone number", embeddable=True
+    )
+    fax: Optional[str] = ConnectorContextField(None, description="Contact's fax number", embeddable=False)
+    title: Optional[str] = ConnectorContextField(None, description="Contact's job title", embeddable=True)
+    department: Optional[str] = ConnectorContextField(
+        None, description="Contact's department", embeddable=True
+    )
+    account_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the associated account", embeddable=False
+    )
+    lead_source: Optional[str] = ConnectorContextField(
+        None, description="Source of the lead", embeddable=True
+    )
+    birthdate: Optional[Any] = ConnectorContextField(
+        None, description="Contact's birthdate", embeddable=False
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Contact description", embeddable=True
+    )
+    owner_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the user who owns the contact", embeddable=False
+    )
+    last_activity_date: Optional[Any] = ConnectorContextField(
+        None, description="Date of the last activity on the contact", embeddable=False
+    )
+    last_viewed_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when the contact was last viewed", embeddable=False
+    )
+    last_referenced_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when the contact was last referenced", embeddable=False
+    )
+    is_deleted: bool = ConnectorContextField(
+        False, description="Indicates whether the contact has been deleted", embeddable=False
+    )
+    is_email_bounced: bool = ConnectorContextField(
+        False,
+        description="Indicates whether emails to this contact bounce",
+        embeddable=False,
+    )
+    is_unread_by_owner: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the contact is unread by the owner",
+        embeddable=False,
+    )
+    jigsaw: Optional[str] = ConnectorContextField(None, description="Data.com ID", embeddable=False)
+    jigsaw_contact_id: Optional[str] = ConnectorContextField(
+        None, description="Data.com contact ID", embeddable=False
+    )
+    clean_status: Optional[str] = ConnectorContextField(
+        None, description="Clean status from Data.com", embeddable=False
+    )
+    level: Optional[str] = ConnectorContextField(None, description="Contact level", embeddable=True)
+    languages: Optional[str] = ConnectorContextField(None, description="Languages spoken", embeddable=True)
+    has_opted_out_of_email: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the contact has opted out of email",
+        embeddable=False,
+    )
+    has_opted_out_of_fax: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the contact has opted out of fax",
+        embeddable=False,
+    )
+    do_not_call: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the contact should not be called",
+        embeddable=False,
+    )
+    mailing_street: Optional[str] = ConnectorContextField(
+        None, description="Mailing street address", embeddable=True
+    )
+    mailing_city: Optional[str] = ConnectorContextField(None, description="Mailing city", embeddable=True)
+    mailing_state: Optional[str] = ConnectorContextField(
+        None, description="Mailing state/province", embeddable=True
+    )
+    mailing_postal_code: Optional[str] = ConnectorContextField(
+        None, description="Mailing postal code", embeddable=False
+    )
+    mailing_country: Optional[str] = ConnectorContextField(
+        None, description="Mailing country", embeddable=True
+    )
+    other_street: Optional[str] = ConnectorContextField(
+        None, description="Other street address", embeddable=True
+    )
+    other_city: Optional[str] = ConnectorContextField(None, description="Other city", embeddable=True)
+    other_state: Optional[str] = ConnectorContextField(
+        None, description="Other state/province", embeddable=True
+    )
+    other_postal_code: Optional[str] = ConnectorContextField(
+        None, description="Other postal code", embeddable=False
+    )
+    other_country: Optional[str] = ConnectorContextField(None, description="Other country", embeddable=True)
+    assistant_name: Optional[str] = ConnectorContextField(
+        None, description="Assistant's name", embeddable=True
+    )
+    assistant_phone: Optional[str] = ConnectorContextField(
+        None, description="Assistant's phone number", embeddable=False
+    )
+    reports_to_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the contact this contact reports to", embeddable=False
+    )
+    email_bounced_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when email bounced", embeddable=False
+    )
+    email_bounced_reason: Optional[str] = ConnectorContextField(
+        None, description="Reason why email bounced", embeddable=True
+    )
+    individual_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the associated individual", embeddable=False
+    )
+    metadata: Dict[str, Any] = ConnectorContextField(
+        default_factory=dict, description="Additional metadata about the contact", embeddable=False
+    )
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        build_record_url_fn: Optional[Callable[[str, Optional[str]], Optional[str]]] = None,
+    ) -> "SalesforceContactEntity":
+        """Construct from a Salesforce Contact API record."""
+        contact_id = data["Id"]
+        contact_name = data.get("Name") or f"Contact {contact_id}"
+        created_time = _parse_dt(data.get("CreatedDate")) or datetime.utcnow()
+        updated_time = _parse_dt(data.get("LastModifiedDate")) or created_time
+
+        account_id = data.get("AccountId")
+        account_obj = data.get("Account") or {}
+        account_name = account_obj.get("Name")
+        breadcrumbs: List[Breadcrumb] = []
+        if account_id:
+            breadcrumbs.append(
+                Breadcrumb(
+                    entity_id=account_id,
+                    name=account_name or f"Account {account_id}",
+                    entity_type=SalesforceAccountEntity.__name__,
+                )
+            )
+
+        web_url_value = build_record_url_fn("Contact", contact_id) if build_record_url_fn else None
+
+        return cls(
+            entity_id=contact_id,
+            breadcrumbs=breadcrumbs,
+            name=contact_name,
+            created_at=created_time,
+            updated_at=updated_time,
+            contact_id=contact_id,
+            contact_name=contact_name,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+            first_name=data.get("FirstName"),
+            last_name=data.get("LastName"),
+            email=data.get("Email"),
+            phone=data.get("Phone"),
+            mobile_phone=data.get("MobilePhone"),
+            fax=data.get("Fax"),
+            title=data.get("Title"),
+            department=data.get("Department"),
+            account_id=data.get("AccountId"),
+            lead_source=data.get("LeadSource"),
+            birthdate=data.get("Birthdate"),
+            description=data.get("Description"),
+            owner_id=data.get("OwnerId"),
+            last_activity_date=data.get("LastActivityDate"),
+            last_viewed_date=data.get("LastViewedDate"),
+            last_referenced_date=data.get("LastReferencedDate"),
+            is_deleted=data.get("IsDeleted", False),
+            is_email_bounced=data.get("IsEmailBounced", False),
+            is_unread_by_owner=data.get("IsUnreadByOwner", False),
+            jigsaw=data.get("Jigsaw"),
+            jigsaw_contact_id=data.get("JigsawContactId"),
+            clean_status=data.get("CleanStatus"),
+            level=data.get("Level__c"),
+            languages=data.get("Languages__c"),
+            has_opted_out_of_email=data.get("HasOptedOutOfEmail", False),
+            has_opted_out_of_fax=data.get("HasOptedOutOfFax", False),
+            do_not_call=data.get("DoNotCall", False),
+            mailing_street=data.get("MailingStreet"),
+            mailing_city=data.get("MailingCity"),
+            mailing_state=data.get("MailingState"),
+            mailing_postal_code=data.get("MailingPostalCode"),
+            mailing_country=data.get("MailingCountry"),
+            other_street=data.get("OtherStreet"),
+            other_city=data.get("OtherCity"),
+            other_state=data.get("OtherState"),
+            other_postal_code=data.get("OtherPostalCode"),
+            other_country=data.get("OtherCountry"),
+            assistant_name=data.get("AssistantName"),
+            assistant_phone=data.get("AssistantPhone"),
+            reports_to_id=data.get("ReportsToId"),
+            email_bounced_date=data.get("EmailBouncedDate"),
+            email_bounced_reason=data.get("EmailBouncedReason"),
+            individual_id=data.get("IndividualId"),
+            metadata=data,
+        )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Browser URL for the contact."""
+        return self.web_url_value or ""
+
+
+class SalesforceOpportunityEntity(BaseEntity):
+    """Schema for Salesforce Opportunity entities.
+
+    Reference:
+        https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_opportunity.htm
+    """
+
+    opportunity_id: str = ConnectorContextField(
+        ..., description="Unique Salesforce ID for the opportunity.", is_entity_id=True
+    )
+    opportunity_name: str = ConnectorContextField(
+        ..., description="Display name of the opportunity.", embeddable=True, is_name=True
+    )
+    created_time: datetime = ConnectorContextField(
+        ..., description="When the opportunity was created.", is_created_at=True
+    )
+    updated_time: datetime = ConnectorContextField(
+        ..., description="When the opportunity was last updated.", is_updated_at=True
+    )
+    web_url_value: Optional[str] = ConnectorContextField(
+        None,
+        description="URL to view the opportunity in Salesforce.",
+        embeddable=False,
+        unhashable=True,
+    )
+
+    # API fields
+    account_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the associated account", embeddable=False
+    )
+    amount: Optional[float] = ConnectorContextField(None, description="Opportunity amount", embeddable=True)
+    close_date: Optional[Any] = ConnectorContextField(
+        None, description="Expected close date", embeddable=True
+    )
+    stage_name: Optional[str] = ConnectorContextField(None, description="Sales stage", embeddable=True)
+    probability: Optional[float] = ConnectorContextField(
+        None, description="Probability percentage", embeddable=True
+    )
+    forecast_category: Optional[str] = ConnectorContextField(
+        None, description="Forecast category", embeddable=True
+    )
+    forecast_category_name: Optional[str] = ConnectorContextField(
+        None, description="Forecast category name", embeddable=True
+    )
+    campaign_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the associated campaign", embeddable=False
+    )
+    has_opportunity_line_item: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the opportunity has line items",
+        embeddable=False,
+    )
+    pricebook2_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the associated pricebook", embeddable=False
+    )
+    owner_id: Optional[str] = ConnectorContextField(
+        None, description="ID of the user who owns the opportunity", embeddable=False
+    )
+    last_activity_date: Optional[Any] = ConnectorContextField(
+        None, description="Date of the last activity on the opportunity", embeddable=False
+    )
+    last_viewed_date: Optional[Any] = ConnectorContextField(
+        None, description="Date when the opportunity was last viewed", embeddable=False
+    )
+    last_referenced_date: Optional[Any] = ConnectorContextField(
+        None,
+        description="Date when the opportunity was last referenced",
+        embeddable=False,
+    )
+    is_deleted: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the opportunity has been deleted",
+        embeddable=False,
+    )
+    is_won: bool = ConnectorContextField(
+        False, description="Indicates whether the opportunity is won", embeddable=True
+    )
+    is_closed: bool = ConnectorContextField(
+        False, description="Indicates whether the opportunity is closed", embeddable=True
+    )
+    has_open_activity: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the opportunity has open activities",
+        embeddable=False,
+    )
+    has_overdue_task: bool = ConnectorContextField(
+        False,
+        description="Indicates whether the opportunity has overdue tasks",
+        embeddable=False,
+    )
+    description: Optional[str] = ConnectorContextField(
+        None, description="Opportunity description", embeddable=True
+    )
+    type: Optional[str] = ConnectorContextField(None, description="Opportunity type", embeddable=True)
+    lead_source: Optional[str] = ConnectorContextField(
+        None, description="Source of the lead", embeddable=True
+    )
+    next_step: Optional[str] = ConnectorContextField(
+        None, description="Next step in the sales process", embeddable=True
+    )
+    metadata: Dict[str, Any] = ConnectorContextField(
+        default_factory=dict,
+        description="Additional metadata about the opportunity",
+        embeddable=False,
+    )
+
+    @classmethod
+    def from_api(
+        cls,
+        data: Dict[str, Any],
+        *,
+        build_record_url_fn: Optional[Callable[[str, Optional[str]], Optional[str]]] = None,
+    ) -> "SalesforceOpportunityEntity":
+        """Construct from a Salesforce Opportunity API record."""
+        opportunity_id = data["Id"]
+        opportunity_name = data.get("Name") or f"Opportunity {opportunity_id}"
+        created_time = _parse_dt(data.get("CreatedDate")) or datetime.utcnow()
+        updated_time = _parse_dt(data.get("LastModifiedDate")) or created_time
+
+        account_id = data.get("AccountId")
+        account_obj = data.get("Account") or {}
+        account_name = account_obj.get("Name")
+        breadcrumbs: List[Breadcrumb] = []
+        if account_id:
+            breadcrumbs.append(
+                Breadcrumb(
+                    entity_id=account_id,
+                    name=account_name or f"Account {account_id}",
+                    entity_type=SalesforceAccountEntity.__name__,
+                )
+            )
+
+        web_url_value = (
+            build_record_url_fn("Opportunity", opportunity_id) if build_record_url_fn else None
+        )
+
+        return cls(
+            entity_id=opportunity_id,
+            breadcrumbs=breadcrumbs,
+            name=opportunity_name,
+            created_at=created_time,
+            updated_at=updated_time,
+            opportunity_id=opportunity_id,
+            opportunity_name=opportunity_name,
+            created_time=created_time,
+            updated_time=updated_time,
+            web_url_value=web_url_value,
+            account_id=data.get("AccountId"),
+            amount=data.get("Amount"),
+            close_date=data.get("CloseDate"),
+            stage_name=data.get("StageName"),
+            probability=data.get("Probability"),
+            forecast_category=data.get("ForecastCategory"),
+            forecast_category_name=data.get("ForecastCategoryName"),
+            campaign_id=data.get("CampaignId"),
+            has_opportunity_line_item=data.get("HasOpportunityLineItem", False),
+            pricebook2_id=data.get("Pricebook2Id"),
+            owner_id=data.get("OwnerId"),
+            last_activity_date=data.get("LastActivityDate"),
+            last_viewed_date=data.get("LastViewedDate"),
+            last_referenced_date=data.get("LastReferencedDate"),
+            is_deleted=data.get("IsDeleted", False),
+            is_won=data.get("IsWon", False),
+            is_closed=data.get("IsClosed", False),
+            has_open_activity=data.get("HasOpenActivity", False),
+            has_overdue_task=data.get("HasOverdueTask", False),
+            description=data.get("Description"),
+            type=data.get("Type"),
+            lead_source=data.get("LeadSource"),
+            next_step=data.get("NextStep"),
+            metadata=data,
+        )
+
+    @computed_field(return_type=str)
+    def web_url(self) -> str:
+        """Browser URL for the opportunity."""
+        return self.web_url_value or ""
